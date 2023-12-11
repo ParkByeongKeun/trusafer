@@ -1,0 +1,16 @@
+{
+    "grpc": {
+        "port": 9000,
+        "cert_file": "server/cert/server.crt",
+        "key_file": "server/cert/private.pem"
+    },
+    "database": {
+        "id": "root",
+        "password": "ijooncadasic",
+        "address": "ijoon.iptime.org:33063",
+        "name": "trusafer"
+    },
+    "etc":{
+        "save_image_dir": "result_image"
+    }
+}

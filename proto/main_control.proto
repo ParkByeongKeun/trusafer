@@ -1,0 +1,429 @@
+/*
+Main Control Protocol
+- App(gRPC client) -> Main Server(gRPC server)
+- Edge Controller(gRPC client) -> Main Server(gRPC server)
+*/
+
+syntax = "proto3";
+
+option go_package = "github.com/ParkByeongKeun/trusafer-idl/maincontrol";
+option java_multiple_files = true;
+option java_package = "net.ijoon.trusafer.main_control";
+option java_outer_classname = "MainControlProto";
+
+package maincontrol;
+
+service MainControl {
+  /* Registerer */
+  rpc CreateRegisterer(CreateRegistererRequest) returns (CreateRegistererResponse) {}
+  rpc ReadRegisterer(ReadRegistererRequest) returns (ReadRegistererResponse) {}
+  rpc ReadRegistererList(ReadRegistererListRequest) returns (ReadRegistererListResponse) {}
+  rpc UpdateRegisterer(UpdateRegistererRequest) returns (UpdateRegistererResponse) {}
+  rpc DeleteRegisterer(DeleteRegistererRequest) returns (DeleteRegistererResponse) {}
+
+/* Place */
+  rpc CreatePlace(CreatePlaceRequest) returns (CreatePlaceResponse) {}
+  rpc ReadPlace(ReadPlaceRequest) returns (ReadPlaceResponse) {}
+  rpc ReadPlaceList(ReadPlaceListRequest) returns (ReadPlaceListResponse) {}
+  rpc UpdatePlace(UpdatePlaceRequest) returns (UpdatePlaceResponse) {}
+  rpc DeletePlace(DeletePlaceRequest) returns (DeletePlaceResponse) {}
+  
+  /* Settop */
+  rpc CreateSettop(CreateSettopRequest) returns (CreateSettopResponse) {}
+  rpc ReadSettop(ReadSettopRequest) returns (ReadSettopResponse) {}
+  rpc ReadSettopList(ReadSettopListRequest) returns (ReadSettopListResponse) {}
+  rpc UpdateSettop(UpdateSettopRequest) returns (UpdateSettopResponse) {}
+  rpc DeleteSettop(DeleteSettopRequest) returns (DeleteSettopResponse) {}
+  
+  /* Sensor */
+  rpc CreateSensor(CreateSensorRequest) returns (CreateSensorResponse) {}
+  rpc ReadSensor(ReadSensorRequest) returns (ReadSensorResponse) {}
+  rpc ReadSensorList(ReadSensorListRequest) returns (ReadSensorListResponse) {}
+  rpc UpdateSensor(UpdateSensorRequest) returns (UpdateSensorResponse) {}
+  rpc DeleteSensor(DeleteSensorRequest) returns (DeleteSensorResponse) {}
+  
+  /* History */
+  rpc CreateHistory(CreateHistoryRequest) returns (CreateHistoryResponse) {}
+  rpc ReadHistory(ReadHistoryRequest) returns (ReadHistoryResponse) {}
+  rpc ReadHistoryList(ReadHistoryListRequest) returns (ReadHistoryListResponse) {}
+  rpc UpdateHistory(UpdateHistoryRequest) returns (UpdateHistoryResponse) {}
+  rpc DeleteHistory(DeleteHistoryRequest) returns (DeleteHistoryResponse) {}
+
+  /* Group */
+  rpc CreateGroup(CreateGroupRequest) returns (CreateGroupResponse) {}
+  rpc ReadGroup(ReadGroupRequest) returns (ReadGroupResponse) {}
+  rpc ReadGroupList(ReadGroupListRequest) returns (ReadGroupListResponse) {}
+  rpc UpdateGroup(UpdateGroupRequest) returns (UpdateGroupResponse) {}
+  rpc DeleteGroup(DeleteGroupRequest) returns (DeleteGroupResponse) {}
+
+  // /* Share */
+  // rpc CreateShareUser(CreateShareRequest) returns (CreateShareResponse) {}
+  // rpc DeleteShareUser(DeleteShareRequest) returns (DeleteShareResponse) {}
+  // rpc UpdateShareUser(UpdateShareRequest) returns (UpdateShareResponse) {}
+  // rpc ReadShareUser(ReadShareRequest) returns (ReadShareResponse) {}
+  // rpc ReadShareUserList(ReadShareListRequest) returns (ReadShareListResponse) {}
+
+}
+
+
+/* Registerer
+
+*/
+enum RegistererStatus {
+  REGISTERER_STATUS_DISABLE = 0; // 비활성화
+  REGISTERER_STATUS_REGISTERED = 1; // 활성화
+  REGISTERER_STATUS_UNSPECIFIED = 2; // 승인대기
+  REGISTERER_STATUS_NOT_REGISTERED = 3; // 미등록
+}
+
+message Registerer {
+  uint64 id = 1;
+  uint64 auth_id = 2;
+  uint64 company_name = 3;
+  string company_number = 4;
+  string company_number_file = 5;
+  RegistererStatus status = 6;
+  bool alarm = 7;
+  uint64 auth = 8;
+  uint64 group_id = 9;
+}
+
+// registerer 등록
+message CreateRegistererRequest {
+  Registerer registerer = 1;
+}
+message CreateRegistererResponse {
+}
+
+// registerer 수정
+message UpdateRegistererRequest {
+  Registerer registerer = 1;
+}
+message UpdateRegistererResponse {
+}
+
+// registerer 삭제
+message DeleteRegistererRequest {
+  uint64 registerer_id = 1;
+}
+message DeleteRegistererResponse {
+}
+
+// 특정 registerer 가져오기
+message ReadRegistererRequest {
+  uint64 registerer_id = 1;
+}
+message ReadRegistererResponse {
+  Registerer registerer = 1;
+}
+
+// 특정 건물의 registerer list 가져오기
+message ReadRegistererListRequest {
+  uint64 place_id = 1;
+}
+message ReadRegistererListResponse {
+  repeated Registerer registerer_list = 1;
+}
+
+message Place {
+  uint64 id = 1;
+  string name = 2;
+  string address = 3;
+  uint64 owner_id = 4;
+  string registered_time = 5;
+}
+
+
+// place 등록
+message CreatePlaceRequest {
+  Place place = 1;
+}
+message CreatePlaceResponse {
+}
+
+// place 수정
+message UpdatePlaceRequest {
+  Place place = 1;
+}
+message UpdatePlaceResponse {
+}
+
+// place 삭제
+message DeletePlaceRequest {
+  uint64 place_id = 1;
+}
+message DeletePlaceResponse {
+}
+
+// 특정 place 가져오기
+message ReadPlaceRequest {
+  uint64 place_id = 1;
+}
+message ReadPlaceResponse {
+  Place place = 1;
+}
+
+// place list 가져오기
+message ReadPlaceListRequest {
+  string owner_name = 1;
+}
+message ReadPlaceListResponse {
+  repeated Place place_list = 1;
+}
+
+
+message ip_module {
+  uint64 id = 1;
+  string ip_address = 2;
+  string mac_address = 3;
+  string firmware_version = 4;
+}
+
+message Settop {
+  uint64 id = 1;
+  string place_id = 2;
+  string serial = 3;
+  string ip_address = 4;
+  string location = 5;
+  string floor = 6;
+  repeated ip_module ip_module = 7;
+  string registered_time = 8;
+}
+
+
+// settop 등록
+message CreateSettopRequest {
+  Settop settop = 1;
+}
+message CreateSettopResponse {
+}
+
+// settop 수정
+message UpdateSettopRequest {
+  Settop settop = 1;
+}
+message UpdateSettopResponse {
+}
+
+// settop 삭제
+message DeleteSettopRequest {
+  uint64 settop_id = 1;
+}
+message DeleteSettopResponse {
+}
+
+// 특정 settop 가져오기
+message ReadSettopRequest {
+  uint64 settop_id = 1;
+}
+message ReadSettopResponse {
+  Settop settop = 1;
+}
+
+// settop list 가져오기
+message ReadSettopListRequest {
+  uint64 place_id = 1;
+}
+message ReadSettopListResponse {
+  repeated Settop settop_list = 1;
+}
+
+
+enum SensorStatus {
+  SENSOR_STATUS_DEFAULT = 0; // 정상
+  SENSOR_STATUS_WARNING = 1; // 주의
+  SENSOR_STATUS_DANGER = 2; // 위험
+  SENSOR_STATUS_INSPECTION = 3; // 점검
+}
+
+
+message Sensor {
+  uint64 id = 1;
+  string settop_id = 2;
+  SensorStatus status = 3;
+  string serial = 4;
+  string ip_address = 5;
+  string location = 6;
+  string threshold_temp = 7;
+  string version = 8;
+  string registered_time = 9;
+}
+
+
+// sensor 등록
+message CreateSensorRequest {
+  Sensor sensor = 1;
+}
+message CreateSensorResponse {
+}
+
+// sensor 수정
+message UpdateSensorRequest {
+  Sensor sensor = 1;
+}
+message UpdateSensorResponse {
+}
+
+// sensor 삭제
+message DeleteSensorRequest {
+  uint64 sensor_id = 1;
+}
+message DeleteSensorResponse {
+}
+
+// 특정 sensor 가져오기
+message ReadSensorRequest {
+  uint64 sensor_id = 1;
+}
+message ReadSensorResponse {
+  Sensor sensor = 1;
+}
+
+// sensor list 가져오기
+message ReadSensorListRequest {
+  uint64 settop_id = 1;
+}
+message ReadSensorListResponse {
+  repeated Sensor sensor_list = 1;
+}
+
+
+message History {
+  uint64 id = 1;
+  string sensor_id = 2;
+  repeated string temp = 3;
+  string date = 4;
+  
+}
+
+
+// history 등록
+message CreateHistoryRequest {
+  History history = 1;
+}
+message CreateHistoryResponse {
+}
+
+// history 수정
+message UpdateHistoryRequest {
+  History history = 1;
+}
+message UpdateHistoryResponse {
+}
+
+// history 삭제
+message DeleteHistoryRequest {
+  uint64 history_id = 1;
+}
+message DeleteHistoryResponse {
+}
+
+// 특정 history 가져오기
+message ReadHistoryRequest {
+  uint64 history_id = 1;
+}
+message ReadHistoryResponse {
+  History history = 1;
+}
+
+// history list 가져오기
+message ReadHistoryListRequest {
+  uint64 sensor_id = 1;
+  uint64 cursor = 2;
+  uint64 count = 3;
+}
+message ReadHistoryListResponse {
+  repeated History history_list = 1;
+}
+
+
+message Group {
+  uint64 id = 1;
+  uint64 place_id = 2;
+  uint64 group_id = 3;
+  string name = 4;
+}
+
+
+// group 등록
+message CreateGroupRequest {
+  Group group = 1;
+}
+message CreateGroupResponse {
+}
+
+// group 수정
+message UpdateGroupRequest {
+  Group group = 1;
+}
+message UpdateGroupResponse {
+}
+
+// group 삭제
+message DeleteGroupRequest {
+  uint64 group_id = 1;
+}
+message DeleteGroupResponse {
+}
+
+// 특정 group 가져오기
+message ReadGroupRequest {
+  uint64 group_id = 1;
+}
+message ReadGroupResponse {
+  Group group = 1;
+}
+
+// group list 가져오기
+message ReadGroupListRequest {
+  uint64 place_id = 1;
+}
+message ReadGroupListResponse {
+  repeated Group group_list = 1;
+}
+
+// message share {
+//   uint64 id = 1;
+//   string sensor_id = 2;
+//   repeated string temp = 3;
+//   string date = 4;
+  
+// }
+
+
+// // share 등록
+// message CreateShareRequest {
+//   Share share = 1;
+// }
+// message CreateShareResponse {
+// }
+
+// // share 수정
+// message UpdateShareRequest {
+//   Share share = 1;
+// }
+// message UpdateShareResponse {
+// }
+
+// // share 삭제
+// message DeleteShareRequest {
+//   uint64 share_id = 1;
+// }
+// message DeleteShareResponse {
+// }
+
+// // 특정 share 가져오기
+// message ReadShareRequest {
+//   uint64 share_id = 1;
+// }
+// message ReadShareResponse {
+//   Share share = 1;
+// }
+
+// // share list 가져오기
+// message ReadShareListRequest {
+//   uint64 sensor_id = 1;
+// }
+// message ReadShareListResponse {
+//   repeated Share share_list = 1;
+// }
