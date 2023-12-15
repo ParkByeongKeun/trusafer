@@ -1,70 +1,47 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"io/ioutil"
 	"log"
-	"sync"
 
-	pb "app_client/proto"
+	pb "github.com/ParkByeongKeun/trusafer-idl/maincontrol"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	// 프로토콜 버퍼 메시지가 정의된 파일의 패키지 경로로 대체하세요.
 )
-
-const (
-	address = "localhost:9000"
-)
-
-var c pb.MainControlClient
-var wg sync.WaitGroup
 
 func main() {
-	opts := grpc.WithInsecure()
-	certFile := "cert/rootca.crt"
-	creds, sslErr := credentials.NewClientTLSFromFile(certFile, "")
-	if sslErr != nil {
-		log.Fatalf("Error while loading CA trust certificate: %v", sslErr)
-		return
-	}
-	opts = grpc.WithTransportCredentials(creds)
-	// Set up a connection to the server.
-	conn, err := grpc.Dial(address, opts)
+	// 예제로 사용할 이미지 경로
+	imagePath := "/Users/bkpark/Downloads/IMG_6153.jpg"
+	// gRPC 서버 연결
+	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+		log.Fatalf("Could not connect: %v", err)
 	}
 	defer conn.Close()
-	c = pb.NewMainControlClient(conn)
 
-	// wg.Add(1)
-	// go testGetBarn()
+	// gRPC 클라이언트 생성
+	client := pb.NewFileServiceClient(conn)
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go testAddRegisterer()
-
-		wg.Add(1)
-		go testUpdateRegistererStatus(6, pb.RegistererStatus_REGISTERER_STATUS_BLOCKED)
-
-		wg.Add(1)
-		go testDeleteRegisterer(23) //registerer id
-
-		wg.Add(1)
-		go testGetRegisterer(1) //registerer id
-
-		wg.Add(1)
-		go testGetRegistererList(1) //barn id
-
-		wg.Add(1)
-		go testGetBarn()
-
-		wg.Add(1)
-		go testGetBarnList()
-
-		wg.Add(1)
-		go testGetAccessLog(1) //barn id
-
-		wg.Add(1)
-		go testOpenGateFromApp(1) //barn id
+	// 파일 서버로 파일 경로 전송
+	response, err := client.SaveFile(context.Background(), &pb.FilePath{
+		Path: imagePath,
+	})
+	if err != nil {
+		log.Fatalf("Error saving file: %v", err)
 	}
 
-	wg.Wait()
+	// 서버 응답 출력
+	fmt.Printf("Server response: %s\n", response.Path)
+}
+
+// 이미지 파일을 읽어 바이트 슬라이스로 반환
+func readFile(filePath string) ([]byte, error) {
+	imageBytes, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return imageBytes, nil
 }

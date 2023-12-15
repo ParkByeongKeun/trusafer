@@ -4,13 +4,36 @@
         "cert_file": "server/cert/server.crt",
         "key_file": "server/cert/private.pem"
     },
+    "gw": {
+        "port": 19000
+    },
     "database": {
         "id": "root",
-        "password": "ijooncadasic",
-        "address": "ijoon.iptime.org:33063",
+        "password": "tmxjavm67",
+        "address": "127.0.0.1:13306",
         "name": "trusafer"
     },
     "etc":{
         "save_image_dir": "result_image"
-    }
+    },
+    
+    "jwt": {
+        "secret_key_rt": "secret1",
+        "secret_key_at": "secret2",
+        "token_duration_at": 1800,
+        "token_duration_rt": 2592000
+      },
+    "broker_address": {
+        "address": "192.168.13.5",
+        "port": "21984"
+    },
+    "log": {
+        "dir": "logs",
+        "file": "authserver.log",
+        "max_size": 10,
+        "max_backups": 6,
+        "max_age": 30,
+        "local_time": true,
+        "compress": false
+      }
 }

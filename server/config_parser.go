@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -21,6 +22,28 @@ type Config struct {
 	Etc struct {
 		SaveImageDir string `json:"save_image_dir"`
 	} `json:"etc`
+	Gw struct {
+		Port int `json:"port"`
+	} `json:"gw"`
+	Log struct {
+		Dir        string `json:"dir"`
+		File       string `json:"file"`
+		MaxSize    int    `json:"max_size"`
+		MaxBackups int    `json:"max_backups"`
+		MaxAge     int    `json:"max_age"`
+		LocalTime  bool   `json:"local_time"`
+		Compress   bool   `json:"compress"`
+	} `json:"log"`
+	Broker_address struct {
+		Address string `json:"address"`
+		Port    string `json:"port"`
+	} `json:"broker_address"`
+	Jwt struct {
+		SecretKeyAT     string        `json:"secret_key_at"`
+		TokenDurationAT time.Duration `json:"token_duration_at"`
+		SecretKeyRT     string        `json:"secret_key_rt"`
+		TokenDurationRT time.Duration `json:"token_duration_rt"`
+	} `json:"jwt"`
 }
 
 func LoadConfiguration(file string) (Config, error) {
