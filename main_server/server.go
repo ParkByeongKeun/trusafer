@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -21,19 +20,19 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
-	"gopkg.in/gomail.v2"
+	"main/firebaseutil"
 
 	pb "github.com/ParkByeongKeun/trusafer-idl/maincontrol"
 	"github.com/ParkByeongKeun/trusafer-idl/maincontrol/service"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
+	"firebase.google.com/go/v4/messaging"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/spf13/viper"
 
@@ -49,6 +48,12 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
+var (
+	firebase_client *messaging.Client
+	firebase_ctx    context.Context = context.Background()
+	tokenList       []string
+)
+
 func accessibleRolesForAT() map[string][]string {
 	return map[string][]string{
 		"admin": {"read", "write", "delete"},
@@ -56,29 +61,25 @@ func accessibleRolesForAT() map[string][]string {
 	}
 }
 
-func uploadFile(w http.ResponseWriter, r *http.Request) {
-	// 파일 읽기
-	file, handler, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
+// func uploadFile(w http.ResponseWriter, r *http.Request) {
+// 	file, handler, err := r.FormFile("file")
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	defer file.Close()
 
-	// 실제 파일 저장
-	f, err := os.OpenFile(handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer f.Close()
+// 	f, err := os.OpenFile(handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	defer f.Close()
 
-	// 파일 복사
-	io.Copy(f, file)
+// 	io.Copy(f, file)
 
-	// 업로드 완료 메시지 출력
-	fmt.Fprintf(w, "File uploaded successfully")
-}
+// 	fmt.Fprintf(w, "File uploaded successfully")
+// }
 
 func accessibleRolesForRT() map[string][]string {
 	return map[string][]string{
@@ -87,7 +88,17 @@ func accessibleRolesForRT() map[string][]string {
 	}
 }
 
+// firebase init
+func initApp() {
+	serviceAccountKeyPath := "./serviceAccountKey.json"
+	_, err := firebaseutil.InitApp(serviceAccountKeyPath)
+	if err != nil {
+		log.Fatalln("[initApp] initializing app error :", err)
+	}
+}
+
 func main() {
+	initApp()
 	conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
 	flag.Parse()
 	conf, err := LoadConfiguration(*conf_file)
@@ -110,7 +121,7 @@ func main() {
 
 	broker := "ssl://192.168.13.5:21984"
 	// mqtt_serial := "serial0021231321"
-	mqtt_serial := RandomString(15)
+	mqtt_serial := RandomString(16)
 	username := "ijoon"
 	password := "9DGQhyCH6RZ4"
 	topic := "truwin/settop"
@@ -344,102 +355,102 @@ func cors(h http.Handler) http.Handler {
 	})
 }
 
-func handleUpload(w http.ResponseWriter, r *http.Request) {
-	// Parse the Multipart/form-data request
-	err := r.ParseMultipartForm(10 << 20) // 10 MB limit for the entire request
-	if err != nil {
-		http.Error(w, "Error parsing form", http.StatusBadRequest)
-		return
-	}
+// func handleUpload(w http.ResponseWriter, r *http.Request) {
+// 	// Parse the Multipart/form-data request
+// 	err := r.ParseMultipartForm(10 << 20) // 10 MB limit for the entire request
+// 	if err != nil {
+// 		http.Error(w, "Error parsing form", http.StatusBadRequest)
+// 		return
+// 	}
 
-	// Extract Protobuf message from the form field
-	protobufData, _, err := r.FormFile("protobuf_data")
-	if err != nil {
-		http.Error(w, "Error retrieving protobuf data", http.StatusBadRequest)
-		return
-	}
-	defer protobufData.Close()
+// 	// Extract Protobuf message from the form field
+// 	protobufData, _, err := r.FormFile("protobuf_data")
+// 	if err != nil {
+// 		http.Error(w, "Error retrieving protobuf data", http.StatusBadRequest)
+// 		return
+// 	}
+// 	defer protobufData.Close()
 
-	protobufBytes, err := ioutil.ReadAll(protobufData)
-	if err != nil {
-		http.Error(w, "Error reading protobuf data", http.StatusInternalServerError)
-		return
-	}
+// 	protobufBytes, err := ioutil.ReadAll(protobufData)
+// 	if err != nil {
+// 		http.Error(w, "Error reading protobuf data", http.StatusInternalServerError)
+// 		return
+// 	}
 
-	registerer := &pb.Registerer{}
-	err = proto.Unmarshal(protobufBytes, registerer)
-	if err != nil {
-		http.Error(w, "Error unmarshalling protobuf data", http.StatusInternalServerError)
-		return
-	}
+// 	registerer := &pb.Registerer{}
+// 	err = proto.Unmarshal(protobufBytes, registerer)
+// 	if err != nil {
+// 		http.Error(w, "Error unmarshalling protobuf data", http.StatusInternalServerError)
+// 		return
+// 	}
 
-	// Extract the file from the form field
-	file, fileHeader, err := r.FormFile("company_number_file")
-	if err != nil {
-		http.Error(w, "Error retrieving file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-	originalFileName := fileHeader.Filename
+// 	// Extract the file from the form field
+// 	file, fileHeader, err := r.FormFile("company_number_file")
+// 	if err != nil {
+// 		http.Error(w, "Error retrieving file", http.StatusBadRequest)
+// 		return
+// 	}
+// 	defer file.Close()
+// 	originalFileName := fileHeader.Filename
 
-	fileBytes, err := ioutil.ReadAll(file)
-	savePath := filepath.Join("/Users", "bkpark", "trusafer")
+// 	fileBytes, err := ioutil.ReadAll(file)
+// 	savePath := filepath.Join("/Users", "bkpark", "trusafer")
 
-	err1 := os.MkdirAll(savePath, 0755)
-	if err1 != nil {
-		log.Printf("Error creating directory: %v", err)
-	}
+// 	err1 := os.MkdirAll(savePath, 0755)
+// 	if err1 != nil {
+// 		log.Printf("Error creating directory: %v", err)
+// 	}
 
-	filePath := filepath.Join(savePath, originalFileName)
+// 	filePath := filepath.Join(savePath, originalFileName)
 
-	err = ioutil.WriteFile(filePath, fileBytes, 0644)
-	if err != nil {
-		log.Printf("Error saving file: %v", err)
-	}
+// 	err = ioutil.WriteFile(filePath, fileBytes, 0644)
+// 	if err != nil {
+// 		log.Printf("Error saving file: %v", err)
+// 	}
 
-	err = sendEmail(filePath)
-	if err != nil {
-		log.Printf("Error sending email: %v", err)
-	}
+// 	err = sendEmail(filePath)
+// 	if err != nil {
+// 		log.Printf("Error sending email: %v", err)
+// 	}
 
-	// Process the Protobuf message and file as needed
-	fmt.Printf("Received Registerer:\n%+v\n", registerer)
-	// fileBytes now contains the binary data of the file
+// 	// Process the Protobuf message and file as needed
+// 	fmt.Printf("Received Registerer:\n%+v\n", registerer)
+// 	// fileBytes now contains the binary data of the file
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Upload successful"))
-}
+// 	w.WriteHeader(http.StatusOK)
+// 	w.Write([]byte("Upload successful"))
+// }
 
-func sendEmail(attachmentPath string) error {
-	from := "ijoon.helper@gmail.com"
-	to := []string{"yot132@ijoon.net"}
-	subject := "File Attachment"
-	body := "Please find the attached file."
+// func sendEmail(attachmentPath string) error {
+// 	from := "ijoon.helper@gmail.com"
+// 	to := []string{"yot132@ijoon.net"}
+// 	subject := "File Attachment"
+// 	body := "Please find the attached file."
 
-	mailer := gomail.NewMessage()
-	mailer.SetHeader("From", from)
-	mailer.SetHeader("To", to...)
-	mailer.SetHeader("Subject", subject)
-	mailer.SetBody("text/plain", body)
+// 	mailer := gomail.NewMessage()
+// 	mailer.SetHeader("From", from)
+// 	mailer.SetHeader("To", to...)
+// 	mailer.SetHeader("Subject", subject)
+// 	mailer.SetBody("text/plain", body)
 
-	attachmentName := filepath.Base(attachmentPath)
-	mailer.Attach(attachmentPath, gomail.Rename(attachmentName))
+// 	attachmentName := filepath.Base(attachmentPath)
+// 	mailer.Attach(attachmentPath, gomail.Rename(attachmentName))
 
-	smtpHost := "smtp.gmail.com"
-	smtpPort := 587
-	smtpUsername := "ijoon.helper@gmail.com"
-	smtpPassword := "ycbygboiryotnjyn"
+// 	smtpHost := "smtp.gmail.com"
+// 	smtpPort := 587
+// 	smtpUsername := "ijoon.helper@gmail.com"
+// 	smtpPassword := "ycbygboiryotnjyn"
 
-	dialer := gomail.NewDialer(smtpHost, smtpPort, smtpUsername, smtpPassword)
+// 	dialer := gomail.NewDialer(smtpHost, smtpPort, smtpUsername, smtpPassword)
 
-	dialer.TLSConfig = nil
+// 	dialer.TLSConfig = nil
 
-	if err := dialer.DialAndSend(mailer); err != nil {
-		return err
-	}
+// 	if err := dialer.DialAndSend(mailer); err != nil {
+// 		return err
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func RandomString(n int) string {
 	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -517,7 +528,6 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 	if len(parts) >= 3 {
 		serial := parts[3]
 
-		// 이미지를 저장할 폴더 생성
 		folderPath := filepath.Join(basePath, serial)
 		err := createFolder(folderPath)
 		if err != nil {
@@ -525,12 +535,10 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 			return
 		}
 
-		// 파일 이름 생성
 		formattedTime := time.Now().Format("2006-01-02 15:04:05")
 		fileName := formattedTime + ".jpg"
 		filePath := filepath.Join(folderPath, fileName)
 
-		// 이미지 저장
 		err = saveImageToFile(filePath, msg.Payload())
 		if err != nil {
 			log.Println("Error saving image:", err)
@@ -612,7 +620,6 @@ func deleteOldImagesInFolder(folderPath string) {
 			return err
 		}
 		if !info.IsDir() {
-			// 파일이 3초 이전이면 삭제
 			if info.ModTime().Before(time.Now().Add(-7 * 24 * time.Hour)) {
 				err := os.Remove(path)
 				if err != nil {
@@ -626,4 +633,10 @@ func deleteOldImagesInFolder(folderPath string) {
 	if err != nil {
 		log.Println("Error deleting old images in folder:", err)
 	}
+}
+
+func SendMessageHandler(title string, body string, style string, topic string) {
+
+	firebaseutil.SendMessage(title, body, style, topic)
+
 }

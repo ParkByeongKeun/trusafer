@@ -103,8 +103,6 @@ func createDBTablesIfNotExist() error {
 			serial varchar(255) UNIQUE DEFAULT NULL,
 			ip_address varchar(255) DEFAULT NULL,
 			location varchar(255) DEFAULT NULL,
-			threshold_temp_warning varchar(255) DEFAULT NULL,
-			threshold_temp_danger varchar(255) DEFAULT NULL,
 			latest_version varchar(255) DEFAULT NULL,
 			registered_time datetime DEFAULT NULL,
 			mac varchar(255) DEFAULT NULL,
@@ -118,6 +116,38 @@ func createDBTablesIfNotExist() error {
 	}
 	log.Println(" - sensor table OK")
 	defer sqlCreateSensor.Close()
+
+	query = fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS threshold (
+			sensor_uuid VARCHAR(36) NOT NULL,
+			temp_warning1 varchar(255) DEFAULT NULL,
+			temp_danger1 varchar(255) DEFAULT NULL,
+			temp_warning2 varchar(255) DEFAULT NULL,
+			temp_danger2 varchar(255) DEFAULT NULL,
+			temp_warning3 varchar(255) DEFAULT NULL,
+			temp_danger3 varchar(255) DEFAULT NULL,
+			temp_warning4 varchar(255) DEFAULT NULL,
+			temp_danger4 varchar(255) DEFAULT NULL,
+			temp_warning5 varchar(255) DEFAULT NULL,
+			temp_danger5 varchar(255) DEFAULT NULL,
+			temp_warning6 varchar(255) DEFAULT NULL,
+			temp_danger6 varchar(255) DEFAULT NULL,
+			temp_warning7 varchar(255) DEFAULT NULL,
+			temp_danger7 varchar(255) DEFAULT NULL,
+			temp_warning8 varchar(255) DEFAULT NULL,
+			temp_danger8 varchar(255) DEFAULT NULL,
+			temp_warning9 varchar(255) DEFAULT NULL,
+			temp_danger9 varchar(255) DEFAULT NULL,
+			PRIMARY KEY (sensor_uuid)
+		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	`)
+	sqlCreateThreshold, err := db.Query(query)
+	if err != nil {
+		log.Printf(" - create Threshold table err: %s", err)
+		return err
+	}
+	log.Println(" - Threshold table OK")
+	defer sqlCreateThreshold.Close()
 
 	query = fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS group_ (

@@ -7,6 +7,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync"
+
+	"main/firebaseutil"
 
 	pb "github.com/ParkByeongKeun/trusafer-idl/maincontrol"
 	"github.com/dgrijalva/jwt-go"
@@ -15,6 +19,52 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+type MainListResponseMapping struct {
+	mu      sync.Mutex
+	mapping map[string]*pb.MainListResponse
+}
+
+func NewMainListResponseMapping() *MainListResponseMapping {
+	return &MainListResponseMapping{
+		mapping: make(map[string]*pb.MainListResponse),
+	}
+}
+
+// 매핑 추가
+func (m *MainListResponseMapping) AddMapping(registererUUID string, response *pb.MainListResponse) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mapping[registererUUID] = response
+}
+
+// 매핑 가져오기
+func (m *MainListResponseMapping) GetMapping(registererUUID string) (*pb.MainListResponse, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	response, ok := m.mapping[registererUUID]
+	return response, ok
+}
+
+// 매핑 삭제
+func (m *MainListResponseMapping) RemoveMapping(registererUUID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mapping, registererUUID)
+}
+
+func DeleteMainList(s *server, ctx context.Context) {
+	registererinfo, err := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
+		Name: "check",
+	})
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer mainListMapping.RemoveMapping(registererinfo.GetRegistererInfo().GetUuid())
+}
+
+var mainListMapping = NewMainListResponseMapping()
 
 type server struct {
 	pb.UnimplementedMainControlServer
@@ -33,11 +83,16 @@ func intToBool(value uint64) bool {
 
 func (s *server) getPermission(ctx context.Context) pb.Permission {
 	md, ok := metadata.FromIncomingContext(ctx)
+	if md["authorization"] == nil {
+		return pb.Permission{}
+	}
+
 	authHeaders, ok := md["authorization"]
 	if !ok || len(authHeaders) == 0 {
 	}
 	token := authHeaders[0]
 	claims := &Claims{}
+
 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte("secret2"), nil
 	})
@@ -98,39 +153,46 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 func (s *server) UpdateRegisterer(ctx context.Context, in *pb.UpdateRegistererRequest) (*pb.UpdateRegistererResponse, error) {
 	var permission_uuid string
 	permission := s.getPermission(ctx)
-	if !permission.User {
-		log.Println("err permission")
-		return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
-	}
-	if !permission.Permission {
-		query := fmt.Sprintf(`
+
+	registererinfo, err := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
+		Name: "check",
+	})
+
+	if registererinfo.GetRegistererInfo().GetUuid() != in.Registerer.GetUuid() {
+
+		if !permission.User {
+			log.Println("err permission")
+			return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
+		}
+		if !permission.Permission {
+			query := fmt.Sprintf(`
         SELECT permission_uuid
         FROM registerer
         WHERE uuid = '%s'
         LIMIT 1
     `, in.Registerer.GetUuid())
 
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-			return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			err := rows.Scan(&permission_uuid)
+			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
-				return nil, err
+				return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				err := rows.Scan(&permission_uuid)
+				if err != nil {
+					log.Println(err)
+					return nil, err
+				}
+			}
+
+			if permission_uuid != in.Registerer.GetPermissionUuid() {
+				log.Println("err permission")
+				return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 			}
 		}
-
-		if permission_uuid != in.Registerer.GetPermissionUuid() {
-			log.Println("err permission")
-			return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
-		}
 	}
-
 	query := fmt.Sprintf(`
 		UPDATE registerer SET
 			auth_email = '%s',
@@ -165,6 +227,7 @@ func (s *server) UpdateRegisterer(ctx context.Context, in *pb.UpdateRegistererRe
 }
 
 func (s *server) DeleteRegisterer(ctx context.Context, in *pb.DeleteRegistererRequest) (*pb.DeleteRegistererResponse, error) {
+	DeleteMainList(s, ctx)
 	query := fmt.Sprintf(`
 		DELETE FROM registerer
 		WHERE uuid = '%s'
@@ -194,6 +257,9 @@ func (s *server) DeleteRegisterer(ctx context.Context, in *pb.DeleteRegistererRe
 func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererRequest) (*pb.ReadRegistererResponse, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+	}
+	if md["authorization"] == nil {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
 	}
 	authHeaders, ok := md["authorization"]
@@ -413,6 +479,8 @@ func (s *server) ReadRegistererList(ctx context.Context, in *pb.ReadRegistererLi
 }
 
 func (s *server) CreatePlace(ctx context.Context, in *pb.CreatePlaceRequest) (*pb.CreatePlaceResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received AddPlace: %s, %s, %s, %s, %s",
 		in.Place.GetUuid(), in.Place.GetName(), in.Place.GetAddress(),
 		in.Place.GetRegistererUuid(), in.Place.GetRegisteredTime())
@@ -444,6 +512,8 @@ func (s *server) CreatePlace(ctx context.Context, in *pb.CreatePlaceRequest) (*p
 }
 
 func (s *server) UpdatePlace(ctx context.Context, in *pb.UpdatePlaceRequest) (*pb.UpdatePlaceResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received UpdatePlace: %s", in.Place.GetUuid())
 	query := fmt.Sprintf(`
 		UPDATE place SET
@@ -477,6 +547,8 @@ func (s *server) UpdatePlace(ctx context.Context, in *pb.UpdatePlaceRequest) (*p
 }
 
 func (s *server) DeletePlace(ctx context.Context, in *pb.DeletePlaceRequest) (*pb.DeletePlaceResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received DeletePlace: %s", in.GetPlaceUuid())
 
 	query := fmt.Sprintf(`
@@ -552,7 +624,7 @@ func (s *server) ReadPlace(ctx context.Context, in *pb.ReadPlaceRequest) (*pb.Re
 }
 
 func (s *server) ReadPlaceList(ctx context.Context, in *pb.ReadPlaceListRequest) (*pb.ReadPlaceListResponse, error) {
-	log.Printf("Received GetPlaceList: success = %s", in.GetRegistererUuid())
+	log.Printf("Received GetPlaceList")
 	response := &pb.ReadPlaceListResponse{}
 
 	var uuid string
@@ -564,8 +636,7 @@ func (s *server) ReadPlaceList(ctx context.Context, in *pb.ReadPlaceListRequest)
 	query := fmt.Sprintf(`
 		SELECT uuid, name, address, registerer_uuid, registered_time 
 		FROM place 
-		WHERE registerer_uuid = '%s'
-		`, in.GetRegistererUuid())
+		`)
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -599,6 +670,8 @@ func (s *server) ReadPlaceList(ctx context.Context, in *pb.ReadPlaceListRequest)
 }
 
 func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (*pb.CreateSettopResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received AddSettop: %s, %s, %s, %s, %d, %s",
 		in.Settop.GetUuid(), in.Settop.GetPlaceUuid(), in.Settop.GetSerial(),
 		in.Settop.GetRoom(), in.Settop.GetFloor(), in.Settop.GetRegisteredTime())
@@ -635,6 +708,8 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 }
 
 func (s *server) UpdateSettop(ctx context.Context, in *pb.UpdateSettopRequest) (*pb.UpdateSettopResponse, error) {
+	DeleteMainList(s, ctx)
+
 	permission := s.getPermission(ctx)
 	var latestVersion string
 
@@ -704,6 +779,8 @@ func (s *server) UpdateSettop(ctx context.Context, in *pb.UpdateSettopRequest) (
 }
 
 func (s *server) DeleteSettop(ctx context.Context, in *pb.DeleteSettopRequest) (*pb.DeleteSettopResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received DeleteSettop: %s", in.GetSettopUuid())
 
 	query := fmt.Sprintf(`
@@ -899,19 +976,28 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 }
 
 func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (*pb.CreateSensorResponse, error) {
+	DeleteMainList(s, ctx)
+
 	permission := s.getPermission(ctx)
 	if !permission.SensorCreate {
 		log.Println("err permission")
 		return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 	}
-	log.Printf("Received AddSensor: %s, %s, %d, %s, %s, %s, %s, %s, %s, %s",
+	log.Printf("Received AddSensor: %s, %s, %d, %s, %s, %s, %s, %s",
 		in.Sensor.GetUuid(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
 		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
-		in.Sensor.GetThresholdTempWarning(), in.Sensor.GetThresholdTempDanger(), in.Sensor.GetLatestVersion(),
-		in.Sensor.GetRegisteredTime())
+		in.Sensor.GetLatestVersion(), in.Sensor.GetRegisteredTime())
 	var uuid = uuid.New()
 	response := &pb.CreateSensorResponse{}
+	var thresholds []*pb.Threshold
 
+	for _, threshold := range in.Sensor.Thresholds {
+		thresholds = append(thresholds, threshold)
+	}
+
+	if len(thresholds) < 9 {
+		return nil, status.Errorf(codes.InvalidArgument, "Bad Request")
+	}
 	query := fmt.Sprintf(`
 		INSERT INTO sensor SET
 			uuid = '%s', 
@@ -920,15 +1006,12 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 			serial = '%s',
 			ip_address = '%s',
 			location = '%s',
-			threshold_temp_warning = '%s',
-			threshold_temp_danger = '%s',
 			latest_version = '%s',
 			registered_time = '%s',
 			mac = '%s'
 		`,
 		uuid.String(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
-		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(), in.Sensor.GetThresholdTempWarning(),
-		in.Sensor.GetThresholdTempDanger(), in.Sensor.GetLatestVersion(),
+		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(), in.Sensor.GetLatestVersion(),
 		in.Sensor.GetRegisteredTime(), in.Sensor.IpModuleMac)
 
 	sqlAddSensor, err := db.Query(query)
@@ -938,44 +1021,82 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		return nil, err
 	}
-	response.Uuid = uuid.String()
 	defer sqlAddSensor.Close()
+
+	query = fmt.Sprintf(`
+		INSERT INTO threshold SET
+			sensor_uuid = '%s', 
+			temp_warning1 = '%s',
+			temp_danger1 = '%s',
+			temp_warning2 = '%s',
+			temp_danger2 = '%s',
+			temp_warning3 = '%s',
+			temp_danger3 = '%s',
+			temp_warning4 = '%s',
+			temp_danger4 = '%s',
+			temp_warning5 = '%s',
+			temp_danger5 = '%s',
+			temp_warning6 = '%s',
+			temp_danger6 = '%s',
+			temp_warning7 = '%s',
+			temp_danger7 = '%s',
+			temp_warning8 = '%s',
+			temp_danger8 = '%s',
+			temp_warning9 = '%s',
+			temp_danger9 = '%s'
+		`,
+		uuid.String(), thresholds[0].GetTempWarning(), thresholds[0].GetTempDanger(),
+		thresholds[1].GetTempWarning(), thresholds[1].GetTempDanger(),
+		thresholds[2].GetTempWarning(), thresholds[2].GetTempDanger(),
+		thresholds[3].GetTempWarning(), thresholds[3].GetTempDanger(),
+		thresholds[4].GetTempWarning(), thresholds[4].GetTempDanger(),
+		thresholds[5].GetTempWarning(), thresholds[5].GetTempDanger(),
+		thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
+		thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
+		thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger())
+
+	sqlThresh, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		// gRPC 오류를 생성하여 상태 코드 설정
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		return nil, err
+	}
+	defer sqlThresh.Close()
+
+	response.Uuid = uuid.String()
 
 	return response, nil
 }
 
 func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (*pb.UpdateSensorResponse, error) {
+	DeleteMainList(s, ctx)
+
 	permission := s.getPermission(ctx)
 	if !permission.SensorInfo {
 		log.Println("err permission")
 		return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 	}
-	var alarm_warning string
-	var alarm_danger string
+	var thresholds []*pb.Threshold
+
+	for _, threshold := range in.Sensor.Thresholds {
+		thresholds = append(thresholds, threshold)
+	}
+
+	if len(thresholds) < 9 {
+		return nil, status.Errorf(codes.InvalidArgument, "Bad Request")
+	}
+	log.Printf("Received UpdateSensor: %s, %s, %d, %s, %s, %s, %s, %s",
+		in.Sensor.GetUuid(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
+		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
+		in.Sensor.GetLatestVersion(), in.Sensor.GetRegisteredTime())
 
 	if !permission.Threshold {
-		query := fmt.Sprintf(`
-        SELECT threshold_temp_warning, threshold_temp_danger
-        FROM sensor
-        WHERE uuid = '%s'
-        LIMIT 1
-    `, in.GetSensor().GetUuid())
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-			return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		}
-		defer rows.Close()
+		sensorResponse, _ := s.ReadSensor(ctx, &pb.ReadSensorRequest{
+			SensorUuid: in.GetSensor().GetUuid(),
+		})
 
-		for rows.Next() {
-			err := rows.Scan(&alarm_warning, &alarm_danger)
-			if err != nil {
-				log.Println(err)
-				return nil, err
-			}
-		}
-
-		if alarm_warning != in.Sensor.ThresholdTempWarning || alarm_danger != in.Sensor.ThresholdTempDanger {
+		if !reflect.DeepEqual(sensorResponse.Sensor.GetThresholds(), in.Sensor.GetThresholds()) {
 			log.Println("err permission")
 			return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 		}
@@ -988,17 +1109,14 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			serial = '%s',
 			ip_address = '%s',
 			location = '%s',
-			threshold_temp_warning = '%s',
-			threshold_temp_danger = '%s',
 			latest_version = '%s',
 			registered_time = '%s',
 			mac = '%s'
 		WHERE uuid = '%s'
 		`,
 		in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
-		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(), in.Sensor.GetThresholdTempWarning(),
-		in.Sensor.GetThresholdTempDanger(), in.Sensor.GetLatestVersion(),
-		in.Sensor.GetRegisteredTime(), in.Sensor.GetUuid(), in.Sensor.IpModuleMac)
+		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(), in.Sensor.GetLatestVersion(),
+		in.Sensor.GetRegisteredTime(), in.Sensor.IpModuleMac, in.Sensor.GetUuid())
 
 	sqlUpdateSensor, err := db.Exec(query)
 	if err != nil {
@@ -1014,12 +1132,103 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		return nil, err
 	}
+
+	checkQuery := fmt.Sprintf("SELECT COUNT(*) FROM threshold WHERE sensor_uuid = '%s'", in.Sensor.GetUuid())
+	var count int
+	if err := db.QueryRow(checkQuery).Scan(&count); err != nil {
+		log.Println(err)
+		return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+	}
+
+	if count == 0 {
+		// 레코드가 없으면 INSERT 수행
+		insertQuery := fmt.Sprintf(`
+		INSERT INTO threshold SET
+		sensor_uuid = '%s', 
+		temp_warning1 = '%s',
+		temp_danger1 = '%s',
+		temp_warning2 = '%s',
+		temp_danger2 = '%s',
+		temp_warning3 = '%s',
+		temp_danger3 = '%s',
+		temp_warning4 = '%s',
+		temp_danger4 = '%s',
+		temp_warning5 = '%s',
+		temp_danger5 = '%s',
+		temp_warning6 = '%s',
+		temp_danger6 = '%s',
+		temp_warning7 = '%s',
+		temp_danger7 = '%s',
+		temp_warning8 = '%s',
+		temp_danger8 = '%s',
+		temp_warning9 = '%s',
+		temp_danger9 = '%s'
+	`,
+			in.Sensor.GetUuid(), thresholds[0].GetTempWarning(), thresholds[0].GetTempDanger(),
+			thresholds[1].GetTempWarning(), thresholds[1].GetTempDanger(),
+			thresholds[2].GetTempWarning(), thresholds[2].GetTempDanger(),
+			thresholds[3].GetTempWarning(), thresholds[3].GetTempDanger(),
+			thresholds[4].GetTempWarning(), thresholds[4].GetTempDanger(),
+			thresholds[5].GetTempWarning(), thresholds[5].GetTempDanger(),
+			thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
+			thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
+			thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger())
+
+		if _, err := db.Exec(insertQuery); err != nil {
+			log.Println(err)
+			return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+		}
+	} else {
+		query = fmt.Sprintf(`
+	UPDATE threshold SET
+			temp_warning1 = '%s',
+			temp_danger1 = '%s',
+			temp_warning2 = '%s',
+			temp_danger2 = '%s',
+			temp_warning3 = '%s',
+			temp_danger3 = '%s',
+			temp_warning4 = '%s',
+			temp_danger4 = '%s',
+			temp_warning5 = '%s',
+			temp_danger5 = '%s',
+			temp_warning6 = '%s',
+			temp_danger6 = '%s',
+			temp_warning7 = '%s',
+			temp_danger7 = '%s',
+			temp_warning8 = '%s',
+			temp_danger8 = '%s',
+			temp_warning9 = '%s',
+			temp_danger9 = '%s'
+			WHERE sensor_uuid = '%s'
+
+		`,
+			thresholds[0].GetTempWarning(), thresholds[0].GetTempDanger(),
+			thresholds[1].GetTempWarning(), thresholds[1].GetTempDanger(),
+			thresholds[2].GetTempWarning(), thresholds[2].GetTempDanger(),
+			thresholds[3].GetTempWarning(), thresholds[3].GetTempDanger(),
+			thresholds[4].GetTempWarning(), thresholds[4].GetTempDanger(),
+			thresholds[5].GetTempWarning(), thresholds[5].GetTempDanger(),
+			thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
+			thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
+			thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger(), in.Sensor.GetUuid())
+
+		sqlThresh, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			// gRPC 오류를 생성하여 상태 코드 설정
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+		defer sqlThresh.Close()
+	}
 	log.Println("update sensor complete: ", affectedCount)
 
 	return &pb.UpdateSensorResponse{}, nil
 }
 
 func (s *server) DeleteSensor(ctx context.Context, in *pb.DeleteSensorRequest) (*pb.DeleteSensorResponse, error) {
+	DeleteMainList(s, ctx)
+
 	log.Printf("Received DeleteSensor: %s", in.GetSensorUuid())
 
 	query := fmt.Sprintf(`
@@ -1042,6 +1251,27 @@ func (s *server) DeleteSensor(ctx context.Context, in *pb.DeleteSensorRequest) (
 		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		return nil, err
 	}
+
+	query = fmt.Sprintf(`
+		DELETE FROM threshold
+		WHERE sensor_uuid = '%s'
+		`,
+		in.GetSensorUuid())
+
+	sqlDeleteThreshold, err := db.Exec(query)
+	if err != nil {
+		log.Println(err)
+		// gRPC 오류를 생성하여 상태 코드 설정
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		return nil, err
+	}
+	nRow, err = sqlDeleteThreshold.RowsAffected()
+	if err != nil {
+		log.Println(err)
+		// gRPC 오류를 생성하여 상태 코드 설정
+		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+		return nil, err
+	}
 	fmt.Println("delete count : ", nRow)
 	return &pb.DeleteSensorResponse{}, nil
 }
@@ -1056,20 +1286,85 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 	var serial string
 	var ip_address string
 	var location string
-	var threshold_temp_warning string
-	var threshold_temp_danger string
 	var latest_version string
 	var registered_time string
 	var ip_module_mac string
 
+	var thresholds []*pb.Threshold
+
 	query := fmt.Sprintf(`
-		SELECT uuid, settop_uuid, status, serial, ip_address, location, threshold_temp_warning, threshold_temp_danger, latest_version, registered_time,mac 
+		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
+			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
+			   temp_warning6, temp_danger6, temp_warning7, temp_danger7, temp_warning8,
+			   temp_danger8, temp_warning9, temp_danger9
+		FROM threshold 
+		WHERE sensor_uuid = '%s'
+		`,
+		in.GetSensorUuid())
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var tempWarning1, tempDanger1 string
+		var tempWarning2, tempDanger2 string
+		var tempWarning3, tempDanger3 string
+		var tempWarning4, tempDanger4 string
+		var tempWarning5, tempDanger5 string
+		var tempWarning6, tempDanger6 string
+		var tempWarning7, tempDanger7 string
+		var tempWarning8, tempDanger8 string
+		var tempWarning9, tempDanger9 string
+
+		if err := rows.Scan(
+			&tempWarning1, &tempDanger1,
+			&tempWarning2, &tempDanger2,
+			&tempWarning3, &tempDanger3,
+			&tempWarning4, &tempDanger4,
+			&tempWarning5, &tempDanger5,
+			&tempWarning6, &tempDanger6,
+			&tempWarning7, &tempDanger7,
+			&tempWarning8, &tempDanger8,
+			&tempWarning9, &tempDanger9,
+		); err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+			return nil, err
+		}
+
+		threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
+		thresholds = append(thresholds, threshold1)
+		threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
+		thresholds = append(thresholds, threshold2)
+		threshold3 := &pb.Threshold{TempWarning: tempWarning3, TempDanger: tempDanger3}
+		thresholds = append(thresholds, threshold3)
+		threshold4 := &pb.Threshold{TempWarning: tempWarning4, TempDanger: tempDanger4}
+		thresholds = append(thresholds, threshold4)
+		threshold5 := &pb.Threshold{TempWarning: tempWarning5, TempDanger: tempDanger5}
+		thresholds = append(thresholds, threshold5)
+		threshold6 := &pb.Threshold{TempWarning: tempWarning6, TempDanger: tempDanger6}
+		thresholds = append(thresholds, threshold6)
+		threshold7 := &pb.Threshold{TempWarning: tempWarning7, TempDanger: tempDanger7}
+		thresholds = append(thresholds, threshold7)
+		threshold8 := &pb.Threshold{TempWarning: tempWarning8, TempDanger: tempDanger8}
+		thresholds = append(thresholds, threshold8)
+		threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
+		thresholds = append(thresholds, threshold9)
+
+	}
+	query = fmt.Sprintf(`
+		SELECT uuid, settop_uuid, status, serial, ip_address, location, latest_version, registered_time,mac 
 		FROM sensor 
 		WHERE uuid = '%s'
 		`,
 		in.GetSensorUuid())
 
-	rows, err := db.Query(query)
+	rows, err = db.Query(query)
 
 	if err != nil {
 		log.Println(err)
@@ -1080,7 +1375,7 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 	defer rows.Close()
 
 	for rows.Next() {
-		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &threshold_temp_warning, &threshold_temp_danger, &latest_version, &registered_time, &ip_module_mac)
+		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &latest_version, &registered_time, &ip_module_mac)
 		if err != nil {
 			log.Println(err)
 			// gRPC 오류를 생성하여 상태 코드 설정
@@ -1095,11 +1390,10 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		sensor.Serial = serial
 		sensor.IpAddress = ip_address
 		sensor.Location = location
-		sensor.ThresholdTempWarning = threshold_temp_warning
-		sensor.ThresholdTempDanger = threshold_temp_danger
 		sensor.LatestVersion = latest_version
 		sensor.RegisteredTime = registered_time
 		sensor.IpModuleMac = ip_module_mac
+		sensor.Thresholds = thresholds
 		response.Sensor = sensor
 	}
 
@@ -1116,14 +1410,12 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 	var serial string
 	var ip_address string
 	var location string
-	var threshold_temp_warning string
-	var threshold_temp_danger string
 	var latest_version string
 	var registered_time string
 	var ip_module_mac string
 
 	query := fmt.Sprintf(`
-		SELECT uuid, settop_uuid, status, serial, ip_address, location, threshold_temp_warning, threshold_temp_danger, latest_version, registered_time, mac 
+		SELECT uuid, settop_uuid, status, serial, ip_address, location, latest_version, registered_time, mac 
 		FROM sensor 
 		WHERE settop_uuid = '%s'
 		`, in.GetSettopUuid())
@@ -1136,14 +1428,81 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 		return nil, err
 	}
 	defer rows.Close()
+	var thresholds []*pb.Threshold
 
 	for rows.Next() {
-		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &threshold_temp_warning, &threshold_temp_danger, &latest_version, &registered_time, &ip_module_mac)
+
+		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &latest_version, &registered_time, &ip_module_mac)
 		if err != nil {
 			log.Println(err)
 			// gRPC 오류를 생성하여 상태 코드 설정
 			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 			return nil, err
+		}
+
+		query := fmt.Sprintf(`
+		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
+			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
+			   temp_warning6, temp_danger6, temp_warning7, temp_danger7, temp_warning8,
+			   temp_danger8, temp_warning9, temp_danger9
+		FROM threshold 
+		WHERE sensor_uuid = '%s'
+		`,
+			uuid)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var tempWarning1, tempDanger1 string
+			var tempWarning2, tempDanger2 string
+			var tempWarning3, tempDanger3 string
+			var tempWarning4, tempDanger4 string
+			var tempWarning5, tempDanger5 string
+			var tempWarning6, tempDanger6 string
+			var tempWarning7, tempDanger7 string
+			var tempWarning8, tempDanger8 string
+			var tempWarning9, tempDanger9 string
+
+			if err := rows.Scan(
+				&tempWarning1, &tempDanger1,
+				&tempWarning2, &tempDanger2,
+				&tempWarning3, &tempDanger3,
+				&tempWarning4, &tempDanger4,
+				&tempWarning5, &tempDanger5,
+				&tempWarning6, &tempDanger6,
+				&tempWarning7, &tempDanger7,
+				&tempWarning8, &tempDanger8,
+				&tempWarning9, &tempDanger9,
+			); err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+				return nil, err
+			}
+
+			threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
+			thresholds = append(thresholds, threshold1)
+			threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
+			thresholds = append(thresholds, threshold2)
+			threshold3 := &pb.Threshold{TempWarning: tempWarning3, TempDanger: tempDanger3}
+			thresholds = append(thresholds, threshold3)
+			threshold4 := &pb.Threshold{TempWarning: tempWarning4, TempDanger: tempDanger4}
+			thresholds = append(thresholds, threshold4)
+			threshold5 := &pb.Threshold{TempWarning: tempWarning5, TempDanger: tempDanger5}
+			thresholds = append(thresholds, threshold5)
+			threshold6 := &pb.Threshold{TempWarning: tempWarning6, TempDanger: tempDanger6}
+			thresholds = append(thresholds, threshold6)
+			threshold7 := &pb.Threshold{TempWarning: tempWarning7, TempDanger: tempDanger7}
+			thresholds = append(thresholds, threshold7)
+			threshold8 := &pb.Threshold{TempWarning: tempWarning8, TempDanger: tempDanger8}
+			thresholds = append(thresholds, threshold8)
+			threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
+			thresholds = append(thresholds, threshold9)
 		}
 
 		sensorList := &pb.Sensor{}
@@ -1153,8 +1512,7 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 		sensorList.Serial = serial
 		sensorList.IpAddress = ip_address
 		sensorList.Location = location
-		sensorList.ThresholdTempWarning = threshold_temp_warning
-		sensorList.ThresholdTempDanger = threshold_temp_danger
+		sensorList.Thresholds = thresholds
 		sensorList.LatestVersion = latest_version
 		sensorList.RegisteredTime = registered_time
 		sensorList.IpModuleMac = ip_module_mac
@@ -1216,6 +1574,7 @@ func (s *server) DeleteHistory(ctx context.Context, in *pb.DeleteHistoryRequest)
 
 func (s *server) ReadHistory(ctx context.Context, in *pb.ReadHistoryRequest) (*pb.ReadHistoryResponse, error) {
 	log.Printf("Received GetHistory: %s", in.GetHistoryUuid())
+	SendMessageHandler("test", "body test", "style", "default")
 	response := &pb.ReadHistoryResponse{}
 
 	var uuid string
@@ -1270,11 +1629,52 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 	var max_temp uint64
 	var date string
 
-	query := fmt.Sprintf(`
+	query := ""
+	trim_interval := 1
+	if in.GetInterval() < 10 {
+		query = fmt.Sprintf(`
 		SELECT uuid, sensor_serial, min_temp, max_temp, date  
 		FROM history 
-		WHERE sensor_serial = '%s'
-		`, in.GetSensorSerial())
+		where date >= '%s' AND date < '%s' AND
+		sensor_serial = '%s'
+		ORDER by id desc
+		LIMIT %d, %d
+	`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), in.GetCursor(), in.GetCount())
+	} else if in.GetInterval() >= 10 && in.GetInterval() < 300 {
+		if in.GetInterval() >= 10 && in.GetInterval() < 20 {
+			trim_interval = 10
+		} else if in.GetInterval() >= 20 && in.GetInterval() < 40 {
+			trim_interval = 30
+		} else {
+			trim_interval = 60
+		}
+		query = fmt.Sprintf(`
+		SELECT uuid, sensor_serial, min_temp, max_temp, date  
+		FROM history 
+		where date >= '%s' AND date < '%s' AND
+		serial = '%s'
+		GROUP by DATE(date), HOUR(date), MINUTE(date), FLOOR(SECOND(date)/%d)
+		ORDER by id desc
+		LIMIT %d, %d
+	`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), trim_interval, in.GetCursor(), in.GetCount())
+	} else {
+		if in.GetInterval() >= (30*10) && in.GetInterval() < (60*20) {
+			trim_interval = 10
+		} else if in.GetInterval() >= (60*20) && in.GetInterval() < (60*40) {
+			trim_interval = 30
+		} else {
+			trim_interval = 60
+		}
+		query = fmt.Sprintf(`
+			SELECT uuid, sensor_serial, min_temp, max_temp, date  
+			FROM history 
+			where date >= '%s' AND date < '%s' AND
+			serial = '%s'
+			GROUP by DATE(date), HOUR(date), FLOOR(MINUTE(date)/%d)
+			ORDER by id desc
+			LIMIT %d, %d
+		`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), trim_interval, in.GetCursor(), in.GetCount())
+	}
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -1303,166 +1703,6 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 	}
 	return response, nil
 }
-
-// func (s *server) CreatIpModule(ctx context.Context, in *pb.CreateIpModuleRequest) (*pb.CreateIpModuleResponse, error) {
-// 	log.Printf("Received AddIpModule: %d, %d, %s, %s, %s",
-// 		in.IpModule.GetId(), in.IpModule.GetSettopId(), in.IpModule.GetIpAddress(), in.IpModule.GetMacAddress(), in.IpModule.GetFirmwareVersion())
-
-// 	query := fmt.Sprintf(`
-// 		INSERT INTO ip_module SET
-// 			settop_id = '%d',
-// 			ip_address = '%s',
-// 			mac_address = '%s',
-// 			firmware_version = '%s'
-// 		`,
-// 		in.IpModule.GetSettopId(), in.IpModule.GetIpAddress(), in.IpModule.GetMacAddress(), in.IpModule.GetFirmwareVersion())
-
-// 	sqlAddRegisterer, err := db.Query(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	defer sqlAddRegisterer.Close()
-
-// 	return &pb.CreateIpModuleResponse{}, nil
-// }
-
-// func (s *server) UpdateIpModule(ctx context.Context, in *pb.UpdateIpModuleRequest) (*pb.UpdateIpModuleResponse, error) {
-// 	log.Printf("Received UpdateIpModule: %d", in.IpModule.GetId())
-// 	query := fmt.Sprintf(`
-// 		UPDATE ip_module SET
-// 			settop_id = '%d',
-// 			ip_address = '%s',
-// 			mac_address = '%s',
-// 			firmware_version = '%s'
-// 		WHERE id = %d
-// 		`,
-// 		in.IpModule.GetSettopId(), in.IpModule.GetIpAddress(), in.IpModule.GetMacAddress(), in.IpModule.GetFirmwareVersion(), in.IpModule.GetId())
-
-// 	sqlUpdateRegisterer, err := db.Exec(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	affectedCount, err := sqlUpdateRegisterer.RowsAffected()
-// 	if err != nil {
-// 		log.Println("affected count error after update query: ", err)
-// 		return nil, err
-// 	}
-// 	log.Println("update ip_module complete: ", affectedCount)
-
-// 	return &pb.UpdateIpModuleResponse{}, nil
-// }
-
-// func (s *server) DeleteIpModule(ctx context.Context, in *pb.DeleteIpModuleRequest) (*pb.DeleteIpModuleResponse, error) {
-// 	log.Printf("Received DeleteIpModule: %d", in.GetIpModuleId())
-
-// 	query := fmt.Sprintf(`
-// 		DELETE FROM ip_module
-// 		WHERE id = %d
-// 		`,
-// 		in.GetIpModuleId())
-
-// 	sqlDeleteRegisterer, err := db.Exec(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	nRow, err := sqlDeleteRegisterer.RowsAffected()
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	fmt.Println("delete count : ", nRow)
-// 	return &pb.DeleteIpModuleResponse{}, nil
-// }
-
-// func (s *server) ReadIpModule(ctx context.Context, in *pb.ReadIpModuleRequest) (*pb.ReadIpModuleResponse, error) {
-// 	log.Printf("Received GetIpModule: %d", in.IpModuleId)
-// 	response := &pb.ReadIpModuleResponse{}
-
-// 	var id uint64
-// 	var settop_id uint64
-// 	var ip_address string
-// 	var mac_address string
-// 	var firmware_version string
-
-// 	query := fmt.Sprintf(`
-// 		SELECT id, settop_id, ip_address, mac_address, firmware_version
-// 		FROM ip_module
-// 		WHERE id = %d
-// 		`,
-// 		in.IpModuleId)
-
-// 	rows, err := db.Query(query)
-
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	for rows.Next() {
-// 		err := rows.Scan(&id, &settop_id, &ip_address, &mac_address, &firmware_version)
-// 		if err != nil {
-// 			log.Println(err)
-// 			return nil, err
-// 		}
-
-// 		ipmodule := &pb.IpModule{}
-// 		ipmodule.Id = id
-// 		ipmodule.SettopId = settop_id
-// 		ipmodule.IpAddress = ip_address
-// 		ipmodule.MacAddress = mac_address
-// 		ipmodule.FirmwareVersion = firmware_version
-
-// 		response.IpModule = ipmodule
-// 	}
-
-// 	return response, nil
-// }
-
-// func (s *server) ReadIpModuleList(ctx context.Context, in *pb.ReadIpModuleListRequest) (*pb.ReadIpModuleListResponse, error) {
-// 	log.Printf("Received GetIpModuleList: success")
-// 	response := &pb.ReadIpModuleListResponse{}
-
-// 	var id uint64
-// 	var settop_id uint64
-// 	var ip_address string
-// 	var mac_address string
-// 	var firmware_version string
-
-// 	query := fmt.Sprintf(`
-// 		SELECT id, settop_id, ip_address, mac_address, firmware_version
-// 		FROM ip_module
-// 		WHERE sensor_id = %d
-// 		`, in.GetSettopId())
-
-// 	rows, err := db.Query(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	for rows.Next() {
-// 		err := rows.Scan(&id, &settop_id, &ip_address, &mac_address, &firmware_version)
-// 		if err != nil {
-// 			log.Println(err)
-// 			return nil, err
-// 		}
-
-// 		ipmoduleList := &pb.IpModule{}
-// 		ipmoduleList.Id = id
-// 		ipmoduleList.SettopId = settop_id
-// 		ipmoduleList.IpAddress = ip_address
-// 		ipmoduleList.MacAddress = mac_address
-// 		ipmoduleList.FirmwareVersion = firmware_version
-
-// 		response.IpModuleList = append(response.IpModuleList, ipmoduleList)
-// 	}
-// 	return response, nil
-// }
 
 func (s *server) CreateGroup(ctx context.Context, in *pb.CreateGroupRequest) (*pb.CreateGroupResponse, error) {
 	log.Printf("Received AddGroup: %s, %s, %d, %s",
@@ -1892,64 +2132,70 @@ func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.Fi
 }
 
 func (s *server) MainList(ctx context.Context, in *pb.MainListRequest) (*pb.MainListResponse, error) {
-	log.Printf("MainList called")
-	response := &pb.MainListResponse{}
+	response, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
+	if ok {
+		fmt.Println("MainListResponse found")
+		return response, nil
+	} else {
+		fmt.Println("MainListResponse not found.")
+		response := &pb.MainListResponse{}
 
-	// Place List
-	placeResponse, err := s.ReadPlaceList(ctx, &pb.ReadPlaceListRequest{
-		RegistererUuid: in.GetRegistererUuid(),
-	})
-	if err != nil {
-		log.Println(err)
-		// You can customize the error response and status code based on your application's requirements.
-		return nil, status.Errorf(codes.Internal, "Failed to retrieve place list: %v", err)
-	}
-
-	var settopList []*pb.Settop
-	var sensorList []*pb.Sensor
-
-	// Iterate through each place to get settops and sensors
-
-	// Settop List for the current place
-	settopResponse, err := s.ReadSettopList(ctx, &pb.ReadSettopListRequest{})
-	if err != nil {
-		log.Println(err)
-		// You can customize the error response and status code based on your application's requirements.
-		return nil, status.Errorf(codes.Internal, "Failed to retrieve settop list: %v", err)
-	}
-
-	// Iterate through each settop to get sensors
-	for _, settop := range settopResponse.SettopList {
-		// Sensor List for the current settop
-		sensorResponse, err := s.ReadSensorList(ctx, &pb.ReadSensorListRequest{
-			SettopUuid: settop.GetUuid(),
-		})
+		// Place List
+		placeResponse, err := s.ReadPlaceList(ctx, &pb.ReadPlaceListRequest{})
 		if err != nil {
 			log.Println(err)
 			// You can customize the error response and status code based on your application's requirements.
-			return nil, status.Errorf(codes.Internal, "Failed to retrieve sensor list: %v", err)
+			return nil, status.Errorf(codes.Internal, "Failed to retrieve place list: %v", err)
 		}
-		settop_ := &pb.Settop{}
-		settop_.Uuid = settop.GetUuid()
-		settop_.PlaceUuid = settop.GetPlaceUuid()
-		settop_.Serial = settop.GetSerial()
-		settop_.Room = settop.GetRoom()
-		settop_.Floor = settop.GetFloor()
-		settop_.Mac1 = settop.GetMac1()
-		settop_.Mac2 = settop.GetMac2()
-		settop_.IsAlive = settop.GetIsAlive()
-		settop_.LatestVersion = settop.GetLatestVersion()
-		settop_.RegisteredTime = settop.GetRegisteredTime()
-		settopList = append(settopList, settop_)
 
-		// Add sensors to the list
-		sensorList = append(sensorList, sensorResponse.GetSensorList()...)
+		var settopList []*pb.Settop
+		var sensorList []*pb.Sensor
+
+		// Iterate through each place to get settops and sensors
+
+		// Settop List for the current place
+		settopResponse, err := s.ReadSettopList(ctx, &pb.ReadSettopListRequest{})
+		if err != nil {
+			log.Println(err)
+			// You can customize the error response and status code based on your application's requirements.
+			return nil, status.Errorf(codes.Internal, "Failed to retrieve settop list: %v", err)
+		}
+
+		// Iterate through each settop to get sensors
+		for _, settop := range settopResponse.SettopList {
+			// Sensor List for the current settop
+			sensorResponse, err := s.ReadSensorList(ctx, &pb.ReadSensorListRequest{
+				SettopUuid: settop.GetUuid(),
+			})
+			if err != nil {
+				log.Println(err)
+				// You can customize the error response and status code based on your application's requirements.
+				return nil, status.Errorf(codes.Internal, "Failed to retrieve sensor list: %v", err)
+			}
+			settop_ := &pb.Settop{}
+			settop_.Uuid = settop.GetUuid()
+			settop_.PlaceUuid = settop.GetPlaceUuid()
+			settop_.Serial = settop.GetSerial()
+			settop_.Room = settop.GetRoom()
+			settop_.Floor = settop.GetFloor()
+			settop_.Mac1 = settop.GetMac1()
+			settop_.Mac2 = settop.GetMac2()
+			settop_.IsAlive = settop.GetIsAlive()
+			settop_.LatestVersion = settop.GetLatestVersion()
+			settop_.RegisteredTime = settop.GetRegisteredTime()
+			settopList = append(settopList, settop_)
+
+			// Add sensors to the list
+			sensorList = append(sensorList, sensorResponse.GetSensorList()...)
+		}
+
+		response.PlaceList = placeResponse.GetPlaceList()
+		response.SettopList = settopList
+		response.SensorList = sensorList
+		mainListMapping.AddMapping(in.GetRegistererUuid(), response)
+		return response, nil
 	}
 
-	response.PlaceList = placeResponse.GetPlaceList()
-	response.SettopList = settopList
-	response.SensorList = sensorList
-	return response, nil
 }
 
 func (s *server) StreamImage(req *pb.ImageRequest, stream pb.MainControl_StreamImageServer) error {
@@ -1982,4 +2228,20 @@ func (s *server) StreamImage(req *pb.ImageRequest, stream pb.MainControl_StreamI
 		}
 	}
 	return nil
+}
+
+func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebaseRequest) (*pb.SubscribeFirebaseResponse, error) {
+	log.Printf("SubscribeFirebase called ", in.GetToken(), "IsSubscribe = ", in.GetIsSubscribe())
+	response := &pb.SubscribeFirebaseResponse{}
+	requestData := make(map[string]string)
+	requestData["token"] = in.GetToken()
+	tokens := []string{requestData["token"]}
+	topic := in.GetTopic()
+
+	err := firebaseutil.SubscribeToTopic(tokens, topic, in.GetIsSubscribe())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	}
+
+	return response, nil
 }
