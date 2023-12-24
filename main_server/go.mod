@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	firebase.google.com/go/v4 v4.13.0
-	github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231220061950-f70690b8046c
+	github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231222071359-25f94cb51394
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/eclipse/paho.mqtt.golang v1.4.3
 	github.com/go-sql-driver/mysql v1.7.1

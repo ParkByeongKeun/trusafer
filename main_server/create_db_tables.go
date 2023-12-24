@@ -35,9 +35,9 @@ func createDBTablesIfNotExist() error {
 		CREATE TABLE IF NOT EXISTS history (
 			uuid VARCHAR(36) NOT NULL,
 			sensor_serial VARCHAR(36) DEFAULT NULL,
-			min_temp int(11) NOT NULL,
-			max_temp int(11) NOT NULL,
-			date date NOT NULL,
+			min_temp FLOAT NOT NULL,
+			max_temp FLOAT NOT NULL,
+			date datetime NOT NULL,
 			PRIMARY KEY (uuid),
 			KEY fk_history_trusafer (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=261 DEFAULT CHARSET=utf8mb4;
@@ -78,7 +78,7 @@ func createDBTablesIfNotExist() error {
 			place_uuid VARCHAR(36) DEFAULT NULL,
 			serial varchar(255) UNIQUE DEFAULT NULL,
 			room varchar(255) DEFAULT NULL,
-			floor int(11) DEFAULT NULL,
+			floor varchar(255) DEFAULT NULL,
 			mac1 varchar(255) DEFAULT NULL,
 			mac2 varchar(255) DEFAULT NULL,
 			is_alive int(11) DEFAULT NULL,
@@ -166,23 +166,23 @@ func createDBTablesIfNotExist() error {
 	log.Println(" - group table OK")
 	defer sqlCreateGroup.Close()
 
-	// query = fmt.Sprintf(`
-	// 	CREATE TABLE IF NOT EXISTS ip_module (
-	// 		id int(11) NOT NULL AUTO_INCREMENT,
-	// 		settop_id int(11) DEFAULT NULL,
-	// 		ip_address varchar(255) DEFAULT NULL,
-	// 		mac_address varchar(255) DEFAULT NULL,
-	// 		firmware_version varchar(255) DEFAULT NULL,
-	// 		PRIMARY KEY (id)
-	// 	) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
-	// `)
-	// sqlCreateipModule, err := db.Query(query)
-	// if err != nil {
-	// 	log.Printf(" - create ipmodule table err: %s", err)
-	// 	return err
-	// }
-	// log.Println(" - ipmodule table OK")
-	// defer sqlCreateipModule.Close()
+	query = fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS log (
+			uuid VARCHAR(36) NOT NULL,
+			unit VARCHAR(36) NOT NULL,
+			sensor_serial VARCHAR(36) NOT NULL,
+			message varchar(255) DEFAULT NULL,
+			registered_time datetime DEFAULT NULL,
+			PRIMARY KEY (uuid)
+		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	`)
+	sqlCreateLog, err := db.Query(query)
+	if err != nil {
+		log.Printf(" - create log table err: %s", err)
+		return err
+	}
+	log.Println(" - log table OK")
+	defer sqlCreateLog.Close()
 
 	query = fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS permission (
