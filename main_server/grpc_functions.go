@@ -2167,7 +2167,7 @@ func (s *server) StreamImage(req *pb.ImageRequest, stream pb.MainControl_StreamI
 	if err != nil {
 		return status.Errorf(codes.InvalidArgument, "Invalid date format: %v", err)
 	}
-
+	// folderPath := filepath.Join("/appserver/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
 	folderPath := filepath.Join("/Users/bkpark/works/go/trusafer/main_server/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
 	fileName := requestTime.Format("15:04:05") + ".jpg"
 	filePath := filepath.Join(folderPath, fileName)
@@ -2267,6 +2267,94 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 	}
 	return response, nil
 }
+
+// func (s *server) UploadCompanyImage(ctx context.Context, in *pb.UploadCompanyImageRequest) (*pb.UploadCompanyImageResponse, error) {
+// 	log.Printf("UploadCompanyImage called")
+// 	response := &pb.UploadCompanyImageResponse{}
+
+// 	md, ok := metadata.FromIncomingContext(ctx)
+// 	if !ok {
+// 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+// 	}
+// 	if md["authorization"] == nil {
+// 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+// 	}
+// 	authHeaders, ok := md["authorization"]
+// 	if !ok || len(authHeaders) == 0 {
+// 		return nil, status.Errorf(codes.Unauthenticated, "Authentication token not provided")
+// 	}
+// 	token := authHeaders[0]
+// 	claims := &Claims{}
+// 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+// 		return []byte("secret2"), nil
+// 	})
+// 	if err != nil {
+// 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
+// 	}
+// 	switch in.Method {
+// 	case "POST":
+// 		in.ParseMultipartForm(10 << 20) //10 MB
+// 		file, handler, err := in.FormFile("file_image")
+// 		if err != nil {
+// 			log.Println("error retrieving file", err)
+// 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 			return nil, err
+// 		}
+// 		defer file.Close()
+// 		dst, err := os.Create(handler.Filename)
+// 		if err != nil {
+// 			log.Println("error creating file", err)
+// 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 			return nil, err
+// 		}
+// 		defer dst.Close()
+// 		if _, err := io.Copy(dst, file); err != nil {
+// 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 			return nil, err
+// 		}
+// 	}
+// 	return response, nil
+// }
+
+// func (s *server) ReadCompanyImage(ctx context.Context, in *pb.ReadCompanyImageRequest) (*pb.ReadCompanyImageResponse, error) {
+// 	log.Printf("ReadCompanyImage called")
+// 	response := &pb.ReadCompanyImageResponse{}
+
+// 	md, ok := metadata.FromIncomingContext(ctx)
+// 	if !ok {
+// 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+// 	}
+// 	if md["authorization"] == nil {
+// 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+// 	}
+// 	authHeaders, ok := md["authorization"]
+// 	if !ok || len(authHeaders) == 0 {
+// 		return nil, status.Errorf(codes.Unauthenticated, "Authentication token not provided")
+// 	}
+// 	token := authHeaders[0]
+// 	claims := &Claims{}
+// 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+// 		return []byte("secret2"), nil
+// 	})
+// 	if err != nil {
+// 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
+// 	}
+// 	filePath := "/Users/bkpark/works/go/trusafer/main_server/20230926_185142.jpg"
+
+// 	file, err := os.Open(filePath)
+// 	if err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	defer file.Close()
+
+// 	w.Header().Set("Content-Type", "image/jpeg")
+// 	if _, err := io.Copy(w, file); err != nil {
+// 		http.Error(w, err.Error(), http.StatusInternalServerError)
+// 		return
+// 	}
+// 	return response, nil
+// }
 
 func roundToDecimalPlaces(value float32, decimalPlaces int) float32 {
 	shift := math.Pow(10, float64(decimalPlaces))

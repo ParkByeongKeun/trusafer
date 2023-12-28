@@ -25,6 +25,9 @@ type Config struct {
 	Gw struct {
 		Port int `json:"port"`
 	} `json:"gw"`
+	Im struct {
+		Port int `json:"port"`
+	} `json:"im"`
 	Log struct {
 		Dir        string `json:"dir"`
 		File       string `json:"file"`

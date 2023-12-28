@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -39,6 +40,7 @@ import (
 	"github.com/spf13/viper"
 
 	_ "github.com/go-sql-driver/mysql"
+	// "github.com/h2non/bimg"
 )
 
 var db *sql.DB
@@ -73,26 +75,6 @@ func accessibleRolesForAT() map[string][]string {
 	}
 }
 
-// func uploadFile(w http.ResponseWriter, r *http.Request) {
-// 	file, handler, err := r.FormFile("file")
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		return
-// 	}
-// 	defer file.Close()
-
-// 	f, err := os.OpenFile(handler.Filename, os.O_WRONLY|os.O_CREATE, 0666)
-// 	if err != nil {
-// 		http.Error(w, err.Error(), http.StatusInternalServerError)
-// 		return
-// 	}
-// 	defer f.Close()
-
-// 	io.Copy(f, file)
-
-// 	fmt.Fprintf(w, "File uploaded successfully")
-// }
-
 func accessibleRolesForRT() map[string][]string {
 	return map[string][]string{
 		"admin": {"refresh"},
@@ -102,6 +84,7 @@ func accessibleRolesForRT() map[string][]string {
 
 // firebase init
 func initApp() {
+	// serviceAccountKeyPath := "/trusafer/serviceAccountKey.json"
 	serviceAccountKeyPath := "./serviceAccountKey.json"
 	_, err := firebaseutil.InitApp(serviceAccountKeyPath)
 	if err != nil {
@@ -110,8 +93,10 @@ func initApp() {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	initApp()
 	conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
+	// conf_file := flag.String("config", "/trusafer/config.json", "config file path")
 	flag.Parse()
 	conf, err := LoadConfiguration(*conf_file)
 	if err != nil {
@@ -126,14 +111,14 @@ func main() {
 	grpcKey := conf.Grpc.KeyFile
 	saveImageDir = conf.Etc.SaveImageDir
 	gwPort := conf.Gw.Port
+	imPort := conf.Im.Port
 	// secret_key_rt := conf.Jwt.SecretKeyRT
 	secret_key_at := conf.Jwt.SecretKeyAT
 	token_duration_at := conf.Jwt.TokenDurationAT
 	// token_duration_rt := conf.Jwt.TokenDurationRT
 
 	broker := "ssl://192.168.13.5:21984"
-	// mqtt_serial := "serial0021231321"
-	mqtt_serial := RandomString(16)
+	mqtt_serial := RandomString(15)
 	username := "ijoon"
 	password := "9DGQhyCH6RZ4"
 	topic := "trusafer"
@@ -158,18 +143,25 @@ func main() {
 		var settop_uuid string
 		var settop_serial string
 
-		//===================================================================================================//
+		// query := "SELECT 1 FROM history LIMIT 1"
+		// _, err := db.Query(query)
+		// if err != nil {
+		// 	//초기 셋팅
+		// 	return
+		// } //todo
 
-		if token := client.Subscribe(topic+"/#", 2, func(client mqtt.Client, msg mqtt.Message) {
+		//===================================================================================================//
+		if token := client.Subscribe(topic+"/#", 1, func(client mqtt.Client, msg mqtt.Message) {
 			parts := strings.Split(msg.Topic(), "/")
 			if len(parts) > 1 {
-				mac := parts[1]
-				mac_parts := strings.Split(mac, ":")
 
-				if len(mac_parts) > 5 {
+				mac := parts[1]
+				// parts[2] == "settop_sn"
+
+				mac_parts := strings.Split(mac, ":")
+				if len(mac_parts) > 5 && parts[3] == "get" {
 					if !isPublished {
 						isPublished = true
-
 						//mac address (ip_module)
 						query := fmt.Sprintf(`
 							SELECT serial 
@@ -195,10 +187,12 @@ func main() {
 
 						if settop_serial == "" {
 							log.Println("err settop_serial")
+							isPublished = false
 							return
 						}
 						if mac == "" {
 							log.Println("err mac empty")
+							isPublished = false
 							return
 						}
 
@@ -210,13 +204,12 @@ func main() {
 						pub_token := client.Publish(set_topic, 0, false, message)
 
 						go func() {
+							isPublished = false
 							_ = pub_token.Wait() // Can also use '<-t.Done()' in releases > 1.2.0
 							if pub_token.Error() != nil {
 								log.Println(pub_token.Error()) // Use your preferred logging technique (or just fmt.Printf)
 							}
-							time.Sleep(10 * time.Second)
-							isPublished = false
-
+							// time.Sleep(10 * time.Second)
 						}()
 
 					}
@@ -296,8 +289,7 @@ func main() {
 						if pub_token.Error() != nil {
 							log.Println(pub_token.Error()) // Use your preferred logging technique (or just fmt.Printf)
 						}
-						time.Sleep(1 * time.Second)
-						isPublished = false
+						// time.Sleep(1 * time.Second)
 					}()
 					defer sqlAddSensor.Close()
 					serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
@@ -410,8 +402,9 @@ func main() {
 
 				}
 
-				if parts[4] == "event" {
-					var sensorData SensorData
+				if parts[4] == "status" {
+					log.Println("status called")
+					// var sensorData SensorData
 					var sensor_type string
 					var check_serial string
 					query := fmt.Sprintf(`
@@ -442,14 +435,20 @@ func main() {
 						sensor_type = "B"
 					}
 
-					err = json.Unmarshal([]byte(msg.Payload()), &sensorData)
-					if err != nil {
-						fmt.Println("JSON Unmarshal error:", err)
-						return
+					var result = 0
+					if string(msg.Payload()) == "normal" {
+						result = 0
 					}
-					result := checkSensorData(sensorData)
+					if string(msg.Payload()) == "warning" {
+						result = 1
+					}
+					if string(msg.Payload()) == "danger" {
+						result = 2
+					}
+
 					formattedTime := time.Now().Format("2006-01-02 15:04:05")
 
+					log.Println("message push")
 					message := eventMessage(parts[1], sensor_type, result, parts[3])
 					SendMessageHandler("Trusafer", message, "style", "default")
 
@@ -651,19 +650,20 @@ func main() {
 		Handler: cors(gwmux),
 	}
 
-	// go func() {
-	log.Printf("Serving gRPC-Gateway on " + gwPortString + " port")
-	log.Fatalln(gwServer.ListenAndServeTLS(certFile, keyFile))
-	// }()
-	// http.HandleFunc("/upload", handleUpload)
-	// httpServer := &http.Server{
-	// 	Addr:    ":8080",
-	// 	Handler: nil, // Use the default ServeMux
-	// }
+	go func() {
+		log.Printf("Serving gRPC-Gateway on " + gwPortString + " port")
+		log.Fatalln(gwServer.ListenAndServeTLS(certFile, keyFile))
+	}()
 
-	// log.Printf("Serving REST API on :8080 port")
-	// log.Fatalln(httpServer.ListenAndServe())
-
+	http.HandleFunc("/upload_company_image", uploadHandler)
+	http.HandleFunc("/get_company_image", imageHandler)
+	imPortString := fmt.Sprintf(":%d", imPort)
+	httpServer := &http.Server{
+		Addr:    imPortString,
+		Handler: nil, // Use the default ServeMux
+	}
+	log.Printf("Serving Image REST API on " + imPortString + " port")
+	log.Fatalln(httpServer.ListenAndServeTLS(certFile, keyFile))
 }
 
 func allowedOrigin(origin string) bool {
@@ -690,71 +690,60 @@ func cors(h http.Handler) http.Handler {
 	})
 }
 
-// func handleUpload(w http.ResponseWriter, r *http.Request) {
-// 	// Parse the Multipart/form-data request
-// 	err := r.ParseMultipartForm(10 << 20) // 10 MB limit for the entire request
-// 	if err != nil {
-// 		http.Error(w, "Error parsing form", http.StatusBadRequest)
-// 		return
-// 	}
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "POST":
+		textValue := r.FormValue("company")
+		userFolder := textValue
+		err := os.MkdirAll(userFolder, os.ModePerm)
+		if err != nil {
+			log.Println("error creating user folder", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		imageFileName := "company_logo" + ".jpg"
+		imageFilePath := filepath.Join(userFolder, imageFileName)
+		file, _, err := r.FormFile("file_image")
+		if err != nil {
+			log.Println("error retrieving file", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
 
-// 	// Extract Protobuf message from the form field
-// 	protobufData, _, err := r.FormFile("protobuf_data")
-// 	if err != nil {
-// 		http.Error(w, "Error retrieving protobuf data", http.StatusBadRequest)
-// 		return
-// 	}
-// 	defer protobufData.Close()
+		dst, err := os.Create(imageFilePath)
+		if err != nil {
+			log.Println("error creating file", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+		if _, err := io.Copy(dst, file); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-// 	protobufBytes, err := ioutil.ReadAll(protobufData)
-// 	if err != nil {
-// 		http.Error(w, "Error reading protobuf data", http.StatusInternalServerError)
-// 		return
-// 	}
+		fmt.Fprintf(w, "uploaded file: %s", imageFilePath)
+	}
+}
 
-// 	registerer := &pb.Registerer{}
-// 	err = proto.Unmarshal(protobufBytes, registerer)
-// 	if err != nil {
-// 		http.Error(w, "Error unmarshalling protobuf data", http.StatusInternalServerError)
-// 		return
-// 	}
+func imageHandler(w http.ResponseWriter, r *http.Request) {
+	textValue := r.FormValue("company")
+	filePath := textValue + "/company_logo.jpg"
 
-// 	// Extract the file from the form field
-// 	file, fileHeader, err := r.FormFile("company_number_file")
-// 	if err != nil {
-// 		http.Error(w, "Error retrieving file", http.StatusBadRequest)
-// 		return
-// 	}
-// 	defer file.Close()
-// 	originalFileName := fileHeader.Filename
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
 
-// 	fileBytes, err := ioutil.ReadAll(file)
-// 	savePath := filepath.Join("/Users", "bkpark", "trusafer")
-
-// 	err1 := os.MkdirAll(savePath, 0755)
-// 	if err1 != nil {
-// 		log.Printf("Error creating directory: %v", err)
-// 	}
-
-// 	filePath := filepath.Join(savePath, originalFileName)
-
-// 	err = ioutil.WriteFile(filePath, fileBytes, 0644)
-// 	if err != nil {
-// 		log.Printf("Error saving file: %v", err)
-// 	}
-
-// 	err = sendEmail(filePath)
-// 	if err != nil {
-// 		log.Printf("Error sending email: %v", err)
-// 	}
-
-// 	// Process the Protobuf message and file as needed
-// 	fmt.Printf("Received Registerer:\n%+v\n", registerer)
-// 	// fileBytes now contains the binary data of the file
-
-// 	w.WriteHeader(http.StatusOK)
-// 	w.Write([]byte("Upload successful"))
-// }
+	w.Header().Set("Content-Type", "image/jpeg")
+	if _, err := io.Copy(w, file); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
 
 // func sendEmail(attachmentPath string) error {
 // 	from := "ijoon.helper@gmail.com"
@@ -888,6 +877,10 @@ func saveImageToFile(filePath string, data []byte, sensor_serial string) error {
 	err := json.Unmarshal(data, &j_frame)
 	if err != nil {
 		log.Println(err)
+	}
+	if j_frame["img"] == nil {
+		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
+		return err
 	}
 	b, err := base64.StdEncoding.DecodeString(j_frame["img"].(string))
 
@@ -1031,7 +1024,6 @@ func eventMessage(settop_serial string, sensor_type string, level_temp int, sens
 	var message string
 	msg_formattedTime := time.Now().Format("2006년 01월 02일 15시 04분 05초")
 
-	log.Println("123 =", sensor_serial)
 	query := fmt.Sprintf(`
 		SELECT place_uuid, room, floor  
 		FROM settop 
@@ -1079,11 +1071,14 @@ func eventMessage(settop_serial string, sensor_type string, level_temp int, sens
 	} else if level_temp == 2 {
 		lev = "이상징후 (위험)"
 		serverLog("이상징후가 발견되었습니다. (위험)", "anomaly", sensor_serial)
-	} else {
+	} else if level_temp == 3 {
 		lev = "이상징후 (점검)"
 		serverLog("이상징후가 발견되었습니다. (점검)", "anomaly", sensor_serial)
 	}
 	message = msg_formattedTime + " " + place_name + " " + floor + "에 설치된 " + room + " " + sensor_type + " 센서에서 " + lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
+	if level_temp == 0 {
+		message = msg_formattedTime + " " + place_name + " " + floor + "에 설치된 " + room + " " + sensor_type + " 센서가 정상입니다."
+	}
 	return message
 }
 
