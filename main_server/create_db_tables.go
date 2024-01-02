@@ -61,6 +61,7 @@ func createDBTablesIfNotExist() error {
 			is_alarm int(11) NOT NULL,
 			permission_uuid VARCHAR(36) DEFAULT NULL, 
 			name varchar(20) NOT NULL,
+			group_uuid VARCHAR(36) DEFAULT NULL, 
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
@@ -106,6 +107,7 @@ func createDBTablesIfNotExist() error {
 			latest_version varchar(255) DEFAULT NULL,
 			registered_time datetime DEFAULT NULL,
 			mac varchar(255) DEFAULT NULL,
+			name varchar(255) DEFAULT NULL,
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
@@ -152,15 +154,30 @@ func createDBTablesIfNotExist() error {
 	query = fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS group_ (
 			uuid VARCHAR(36) NOT NULL,
-			place_uuid VARCHAR(36) DEFAULT NULL,
-			group_id int(11) DEFAULT NULL,
-			name varchar(255) DEFAULT NULL,
+			name varchar(255) UNIQUE DEFAULT NULL,
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
 	sqlCreateGroup, err := db.Query(query)
 	if err != nil {
 		log.Printf(" - create group table err: %s", err)
+		return err
+	}
+	log.Println(" - group table OK")
+	defer sqlCreateGroup.Close()
+	initGroup()
+
+	query = fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS group_gateway (
+			group_uuid VARCHAR(36) NOT NULL,
+			registerer_uuid VARCHAR(36) DEFAULT NULL,
+			settop_uuid VARCHAR(36) DEFAULT NULL,
+			PRIMARY KEY (group_uuid)
+		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	`)
+	sqlCreateGroup, err = db.Query(query)
+	if err != nil {
+		log.Printf(" - create group_settop table err: %s", err)
 		return err
 	}
 	log.Println(" - group table OK")
@@ -244,5 +261,34 @@ func initPermission() {
 		}
 
 		log.Println(" - data inserted into permission table")
+	}
+}
+
+func initGroup() {
+	uuidDefault := uuid.New()
+
+	var count int
+	countQuery := "SELECT COUNT(*) FROM group_"
+	err := db.QueryRow(countQuery).Scan(&count)
+	if err != nil {
+		log.Printf(" - query count from group_ table err: %s", err)
+		return
+	}
+	if count == 0 {
+		insertQuery := fmt.Sprintf(`
+			INSERT INTO group_ (uuid, name)
+			VALUES 
+			('%s', '%s');
+		`,
+			uuidDefault.String(), "master",
+		)
+
+		_, err := db.Exec(insertQuery)
+		if err != nil {
+			log.Printf(" - insert data into group table err: %s", err)
+			return
+		}
+
+		log.Println(" - data inserted into group table")
 	}
 }

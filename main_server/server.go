@@ -655,8 +655,8 @@ func main() {
 		log.Fatalln(gwServer.ListenAndServeTLS(certFile, keyFile))
 	}()
 
-	http.HandleFunc("/upload_company_image", uploadHandler)
-	http.HandleFunc("/get_company_image", imageHandler)
+	http.HandleFunc("/api/main/image/v1/upload_company_image", uploadHandler)
+	http.HandleFunc("/api/main/image/v1/get_company_image", imageHandler)
 	imPortString := fmt.Sprintf(":%d", imPort)
 	httpServer := &http.Server{
 		Addr:    imPortString,
@@ -698,7 +698,10 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		err := os.MkdirAll(userFolder, os.ModePerm)
 		if err != nil {
 			log.Println("error creating user folder", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		imageFileName := "company_logo" + ".jpg"
@@ -706,7 +709,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		file, _, err := r.FormFile("file_image")
 		if err != nil {
 			log.Println("error retrieving file", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer file.Close()
@@ -714,12 +717,12 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		dst, err := os.Create(imageFilePath)
 		if err != nil {
 			log.Println("error creating file", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		defer dst.Close()
 		if _, err := io.Copy(dst, file); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -733,14 +736,14 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	if _, err := io.Copy(w, file); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 }

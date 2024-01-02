@@ -24,6 +24,10 @@ github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228052541-b8f49dcfdd3d h1:wCF
 github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228052541-b8f49dcfdd3d/go.mod h1:0xApCOSIKr89DN0ufOBiWWyMW54rYoVWK6NL248eknI=
 github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228054805-45ceebd79181 h1:9+M3UXuRPMtLC4m2t3fecYAVNHihg7816cW+/BEiwCw=
 github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228054805-45ceebd79181/go.mod h1:0xApCOSIKr89DN0ufOBiWWyMW54rYoVWK6NL248eknI=
+github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228085739-0d60943568e1 h1:O9LR7VDtBmxy6+Ccf1kdFFbrqi/o3peG0AAUOBxXn3A=
+github.com/ParkByeongKeun/trusafer-idl v0.0.0-20231228085739-0d60943568e1/go.mod h1:0xApCOSIKr89DN0ufOBiWWyMW54rYoVWK6NL248eknI=
+github.com/ParkByeongKeun/trusafer-idl v0.0.0-20240102021049-5a8b36eb5413 h1:K5NdUOufjT6qUX7RSzHPukgNT3At5oUNTNb985kTOAQ=
+github.com/ParkByeongKeun/trusafer-idl v0.0.0-20240102021049-5a8b36eb5413/go.mod h1:0xApCOSIKr89DN0ufOBiWWyMW54rYoVWK6NL248eknI=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
