@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,7 +24,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"main/utils"
 
 	"main/firebaseutil"
 
@@ -38,6 +44,7 @@ import (
 	"firebase.google.com/go/v4/messaging"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/spf13/viper"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	_ "github.com/go-sql-driver/mysql"
 	// "github.com/h2non/bimg"
@@ -47,6 +54,33 @@ var db *sql.DB
 var saveImageDir string
 var client mqtt.Client
 var isPublished bool
+var base_topic string
+var logger utils.Logger
+var mu sync.Mutex
+var temp_min_array [9]float64
+var temp_max_array [9]float64
+var broker_mutex = &sync.Mutex{}
+var (
+	aesSecretKey []byte
+)
+
+var mEventEndTimes map[string]int64
+
+func init() {
+	mEventEndTimes = make(map[string]int64)
+}
+
+var mStatus map[string]string
+
+func init() {
+	mStatus = make(map[string]string)
+}
+
+var mGroupUUIDs map[string][]string
+
+func init() {
+	mGroupUUIDs = make(map[string][]string)
+}
 
 type SensorData struct {
 	Danger  []bool `json:"danger"`
@@ -59,6 +93,7 @@ type TempInit struct {
 
 type Claims struct {
 	Email string `json:"email"`
+	Admin bool   `json:"admin"`
 	jwt.StandardClaims
 }
 
@@ -84,8 +119,8 @@ func accessibleRolesForRT() map[string][]string {
 
 // firebase init
 func initApp() {
-	// serviceAccountKeyPath := "/trusafer/serviceAccountKey.json"
-	serviceAccountKeyPath := "./serviceAccountKey.json"
+	// serviceAccountKeyPath := "./serviceAccountKey.json"
+	serviceAccountKeyPath := "/trusafer/serviceAccountKey.json"
 	_, err := firebaseutil.InitApp(serviceAccountKeyPath)
 	if err != nil {
 		log.Fatalln("[initApp] initializing app error :", err)
@@ -93,35 +128,57 @@ func initApp() {
 }
 
 func main() {
+	log.Println("ver1")
 	rand.Seed(time.Now().UnixNano())
 	initApp()
-	conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
-	// conf_file := flag.String("config", "/trusafer/config.json", "config file path")
+	// conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
+	conf_file := flag.String("config", "/trusafer/config.json", "config file path")
 	flag.Parse()
-	conf, err := LoadConfiguration(*conf_file)
+	err := LoadConfiguration(*conf_file)
 	if err != nil {
 		log.Fatal(err)
 	}
-	dbID := conf.Database.Id
-	dbPW := conf.Database.Password
-	dbAddr := conf.Database.Address
-	dbName := conf.Database.Name
-	grpcPort := conf.Grpc.Port
-	grpcCert := conf.Grpc.CertFile
-	grpcKey := conf.Grpc.KeyFile
-	saveImageDir = conf.Etc.SaveImageDir
-	gwPort := conf.Gw.Port
-	imPort := conf.Im.Port
-	// secret_key_rt := conf.Jwt.SecretKeyRT
-	secret_key_at := conf.Jwt.SecretKeyAT
-	token_duration_at := conf.Jwt.TokenDurationAT
-	// token_duration_rt := conf.Jwt.TokenDurationRT
+	logFilePath := filepath.Join(Conf.Log.Dir, Conf.Log.File)
+	lbj := &lumberjack.Logger{
+		Filename:   logFilePath,
+		MaxSize:    Conf.Log.MaxSize, // megabytes
+		MaxBackups: Conf.Log.MaxBackups,
+		MaxAge:     Conf.Log.MaxAge, //days
+		LocalTime:  Conf.Log.LocalTime,
+		Compress:   Conf.Log.Compress, // disabled by default
+	}
+	defer lbj.Close()
+	logger = utils.NewLogger(lbj)
+	logger.Title.Printf("Start Server")
 
-	broker := "ssl://192.168.13.5:21984"
+	dbID := Conf.Database.Id
+	dbPW := Conf.Database.Password
+	dbAddr := Conf.Database.Address
+	dbName := Conf.Database.Name
+	grpcPort := Conf.Grpc.Port
+	grpcCert := Conf.Grpc.CertFile
+	grpcKey := Conf.Grpc.KeyFile
+	saveImageDir = Conf.Etc.SaveImageDir
+	gwPort := Conf.Gw.Port
+	imPort := Conf.Im.Port
+	// secret_key_rt := Conf.Jwt.SecretKeyRT
+	secret_key_at := Conf.Jwt.SecretKeyAT
+	token_duration_at := Conf.Jwt.TokenDurationAT
+	// token_duration_rt := Conf.Jwt.TokenDurationRT
+
+	hash := sha256.New()
+	_, err = hash.Write([]byte(Conf.Encryption.Passphrase))
+	if err != nil {
+		log.Println(err.Error())
+	}
+	aesSecretKey = hash.Sum(nil)
+
+	// broker := "ssl://192.168.13.5:21984"
+	broker := "ssl://broker:1883"
 	mqtt_serial := RandomString(15)
 	username := "ijoon"
-	password := "9DGQhyCH6RZ4"
-	topic := "trusafer"
+	password := "vXH5iVMqTfXB"
+	base_topic = "trusafer"
 	opts1 := mqtt.NewClientOptions().AddBroker(broker)
 
 	tlsconfig := NewTLSConfig()
@@ -138,426 +195,26 @@ func main() {
 
 	opts1.SetOnConnectHandler(func(c mqtt.Client) {
 		println("mqtt connected!")
-		currentTime := time.Now()
-		formattedTime := currentTime.Format("2006-01-02 15:04:05")
-		var settop_uuid string
-		var settop_serial string
-
-		// query := "SELECT 1 FROM history LIMIT 1"
-		// _, err := db.Query(query)
-		// if err != nil {
-		// 	//초기 셋팅
-		// 	return
-		// } //todo
-
-		//===================================================================================================//
-		if token := client.Subscribe(topic+"/#", 1, func(client mqtt.Client, msg mqtt.Message) {
-			parts := strings.Split(msg.Topic(), "/")
-			if len(parts) > 1 {
-
-				mac := parts[1]
-				// parts[2] == "settop_sn"
-
-				mac_parts := strings.Split(mac, ":")
-				if len(mac_parts) > 5 && parts[3] == "get" {
-					if !isPublished {
-						isPublished = true
-						//mac address (ip_module)
-						query := fmt.Sprintf(`
-							SELECT serial 
-							FROM settop 
-							WHERE mac1 = '%s' OR mac2 = '%s'
-						`,
-							mac, mac)
-
-						rows, err := db.Query(query)
-						if err != nil {
-							log.Println(err)
-							err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-						}
-
-						defer rows.Close()
-						for rows.Next() {
-							err := rows.Scan(&settop_serial)
-							if err != nil {
-								log.Println(err)
-								err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-							}
-						}
-
-						if settop_serial == "" {
-							log.Println("err settop_serial")
-							isPublished = false
-							return
-						}
-						if mac == "" {
-							log.Println("err mac empty")
-							isPublished = false
-							return
-						}
-
-						set_topic := "trusafer/" + mac + "/settop_sn/data"
-
-						message := settop_serial
-
-						log.Println(settop_serial)
-						pub_token := client.Publish(set_topic, 0, false, message)
-
-						go func() {
-							isPublished = false
-							_ = pub_token.Wait() // Can also use '<-t.Done()' in releases > 1.2.0
-							if pub_token.Error() != nil {
-								log.Println(pub_token.Error()) // Use your preferred logging technique (or just fmt.Printf)
-							}
-							// time.Sleep(10 * time.Second)
-						}()
-
-					}
-				}
-			}
-
-			// register
-			if len(parts) > 4 {
-				var uuid = uuid.New()
-
-				if parts[4] == "regist" {
-					// settopSerial := parts[1]
-					settopMac := parts[2]
-					sensorSerial := parts[3]
-					query := fmt.Sprintf(`
-						SELECT uuid 
-						FROM settop 
-						WHERE mac1 = '%s' OR mac2 = '%s'
-					`,
-						settopMac, settopMac)
-					rows, err := db.Query(query)
-					if err != nil {
-						log.Println(err)
-						err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-					}
-
-					defer rows.Close()
-					for rows.Next() {
-						err := rows.Scan(&settop_uuid)
-						if err != nil {
-							log.Println(err)
-							err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-						}
-					}
-					if settop_uuid == "" {
-						log.Println("settop_uuid not found")
-						return
-					}
-
-					query = fmt.Sprintf(`
-						INSERT INTO sensor
-							SET uuid = '%s', 
-								settop_uuid = '%s',
-								status = '%d',
-								serial = '%s',
-								ip_address = '%s',
-								location = '%s',
-								latest_version = '%s',
-								registered_time = '%s',
-								mac = '%s'
-						ON DUPLICATE KEY UPDATE
-							settop_uuid = VALUES(settop_uuid),
-							status = VALUES(status),
-							ip_address = VALUES(ip_address),
-							location = VALUES(location),
-							latest_version = VALUES(latest_version),
-							registered_time = VALUES(registered_time),
-							mac = VALUES(mac)
-					`,
-						uuid.String(), settop_uuid, 0,
-						sensorSerial, "", "", "",
-						formattedTime, settopMac,
-					)
-
-					sqlAddSensor, err := db.Query(query)
-
-					if err != nil {
-						log.Println(err)
-					}
-					mainListMapping = NewMainListResponseMapping()
-
-					threshold_topic := "trusafer/" + parts[1] + "/" + parts[2] + "/" + parts[3] + "/threshold9/get"
-					pub_token := client.Publish(threshold_topic, 0, false, "")
-
-					go func() {
-						_ = pub_token.Wait() // Can also use '<-t.Done()' in releases > 1.2.0
-						if pub_token.Error() != nil {
-							log.Println(pub_token.Error()) // Use your preferred logging technique (or just fmt.Printf)
-						}
-						// time.Sleep(1 * time.Second)
-					}()
-					defer sqlAddSensor.Close()
-					serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
-				}
-				if parts[4] == "deregist" {
-					sensorSerial := parts[3]
-					query := fmt.Sprintf(`
-					UPDATE sensor SET
-						status = '%d'
-					WHERE serial = '%s'
-					`,
-						3, sensorSerial)
-
-					_, err := db.Exec(query)
-					if err != nil {
-						log.Println(err)
-						// gRPC 오류를 생성하여 상태 코드 설정
-					}
-					mainListMapping = NewMainListResponseMapping()
-					serverLog("센서의 연결이 끊어졌습니다.", "web", sensorSerial)
-				}
-				// history data
-				if parts[4] == "data" {
-					sensorSerial := parts[3]
-					basePath := "storage_data/"
-					processMqttMessage(msg, basePath)
-					var decodedData map[string]interface{}
-					err := json.Unmarshal(msg.Payload(), &decodedData)
-					if err != nil {
-						serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[3])
-						fmt.Println("JSON decoding error:", err)
-						return
-					}
-					var minValue, maxValue float64
-
-					maxValues, ok := decodedData["max"].([]interface{})
-					if !ok {
-						// 적절한 타입으로 변환할 수 없는 경우 처리
-						fmt.Println("Error: 'max' is not of type []float64")
-						return
-					}
-
-					for i, value := range maxValues {
-						if intValue, ok := value.(float64); ok {
-							if i == 0 {
-								maxValue = intValue
-							} else {
-								maxValue = math.Max(maxValue, float64(intValue))
-							}
-						}
-					}
-					minValues, ok := decodedData["min"].([]interface{})
-					if !ok {
-						fmt.Println("Error: 'min' is not of type []float64")
-						return
-					}
-
-					for i, value := range minValues {
-						if intValue, ok := value.(float64); ok {
-							if i == 0 {
-								minValue = intValue
-							} else {
-								minValue = math.Min(minValue, float64(intValue))
-							}
-						}
-					}
-					formattedTime := time.Now().Format("2006-01-02 15:04:05")
-					// log.Println(formattedTime)
-					query := fmt.Sprintf(`
-						INSERT INTO history SET
-							uuid = '%s', 
-							sensor_serial = '%s',
-							min_temp = '%f',
-							max_temp = '%f',
-							date = '%s'
-						`,
-						uuid.String(), sensorSerial, minValue, maxValue, formattedTime)
-
-					sqlAddRegisterer, err := db.Query(query)
-					if err != nil {
-						log.Println(err)
-						err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-					}
-					defer sqlAddRegisterer.Close()
-				}
-
-				if parts[3] == "connection" {
-					// var decodedData map[string]interface{}
-					// err := json.Unmarshal(msg.Payload(), &decodedData)
-					// if err != nil {
-					// 	fmt.Println("JSON decoding error:", err)
-					// 	return
-					// }
-					payloadStr := string(msg.Payload())
-					isAlive, err := strconv.Atoi(payloadStr)
-
-					settop_serial := parts[1]
-					query := fmt.Sprintf(`
-						UPDATE settop SET
-							is_alive = '%d'
-						WHERE serial = '%s'
-						`,
-						isAlive, settop_serial)
-
-					_, err = db.Exec(query)
-					if err != nil {
-						log.Println(err)
-					}
-					mainListMapping = NewMainListResponseMapping()
-
-				}
-
-				if parts[4] == "status" {
-					log.Println("status called")
-					// var sensorData SensorData
-					var sensor_type string
-					var check_serial string
-					query := fmt.Sprintf(`
-							SELECT serial 
-							FROM settop 
-							WHERE mac1 = '%s'
-						`,
-						parts[2])
-
-					rows, err := db.Query(query)
-					if err != nil {
-						log.Println(err)
-						err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-					}
-
-					defer rows.Close()
-					for rows.Next() {
-						err := rows.Scan(&check_serial)
-						if err != nil {
-							log.Println(err)
-							err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-						}
-					}
-
-					if check_serial != "" {
-						sensor_type = "A"
-					} else {
-						sensor_type = "B"
-					}
-
-					var result = 0
-					if string(msg.Payload()) == "normal" {
-						result = 0
-					}
-					if string(msg.Payload()) == "warning" {
-						result = 1
-					}
-					if string(msg.Payload()) == "danger" {
-						result = 2
-					}
-
-					formattedTime := time.Now().Format("2006-01-02 15:04:05")
-
-					log.Println("message push")
-					message := eventMessage(parts[1], sensor_type, result, parts[3])
-					SendMessageHandler("Trusafer", message, "style", "default")
-
-					query = fmt.Sprintf(`
-						INSERT INTO log SET
-							uuid = '%s', 
-							unit = '%s',
-							message = '%s',
-							sensor_serial = '%s',
-							registered_time = '%s'
-						`,
-						uuid.String(), "mobile", message, parts[3], formattedTime)
-
-					sqlAddRegisterer, err := db.Query(query)
-					if err != nil {
-						log.Println(err)
-					}
-					defer sqlAddRegisterer.Close()
-
-					sensorSerial := parts[3]
-					query = fmt.Sprintf(`
-					UPDATE sensor SET
-						status = '%d'
-					WHERE serial = '%s'
-					`,
-						result, sensorSerial)
-
-					_, err = db.Exec(query)
-					if err != nil {
-						log.Println(err)
-					}
-					mainListMapping = NewMainListResponseMapping()
-				}
-
-				if len(parts) == 6 {
-					if parts[5] == "data" {
-						var tempInit TempInit
-
-						var sensor_uuid string
-						query := fmt.Sprintf(`
-							SELECT uuid  
-							FROM sensor 
-							WHERE serial = '%s' 
-						`,
-							parts[3])
-
-						rows, err := db.Query(query)
-						if err != nil {
-							log.Println(err)
-						}
-
-						defer rows.Close()
-						for rows.Next() {
-							err := rows.Scan(&sensor_uuid)
-							if err != nil {
-								log.Println(err)
-							}
-						}
-
-						err = json.Unmarshal([]byte(msg.Payload()), &tempInit)
-						if err != nil {
-							fmt.Println("JSON Unmarshal error:", err)
-							return
-						}
-						query = fmt.Sprintf(`
-						INSERT IGNORE INTO threshold SET
-							sensor_uuid = '%s', 
-							temp_warning1 = '%s',
-							temp_danger1 = '%s',
-							temp_warning2 = '%s',
-							temp_danger2 = '%s',
-							temp_warning3 = '%s',
-							temp_danger3 = '%s',
-							temp_warning4 = '%s',
-							temp_danger4 = '%s',
-							temp_warning5 = '%s',
-							temp_danger5 = '%s',
-							temp_warning6 = '%s',
-							temp_danger6 = '%s',
-							temp_warning7 = '%s',
-							temp_danger7 = '%s',
-							temp_warning8 = '%s',
-							temp_danger8 = '%s',
-							temp_warning9 = '%s',
-							temp_danger9 = '%s'
-						`,
-							sensor_uuid, strconv.Itoa(tempInit.Warning[0]), strconv.Itoa(tempInit.Danger[0]),
-							strconv.Itoa(tempInit.Warning[1]), strconv.Itoa(tempInit.Danger[1]),
-							strconv.Itoa(tempInit.Warning[2]), strconv.Itoa(tempInit.Danger[2]),
-							strconv.Itoa(tempInit.Warning[3]), strconv.Itoa(tempInit.Danger[3]),
-							strconv.Itoa(tempInit.Warning[4]), strconv.Itoa(tempInit.Danger[4]),
-							strconv.Itoa(tempInit.Warning[5]), strconv.Itoa(tempInit.Danger[5]),
-							strconv.Itoa(tempInit.Warning[6]), strconv.Itoa(tempInit.Danger[6]),
-							strconv.Itoa(tempInit.Warning[7]), strconv.Itoa(tempInit.Danger[7]),
-							strconv.Itoa(tempInit.Warning[8]), strconv.Itoa(tempInit.Danger[8]))
-						sqlThresh, err := db.Query(query)
-						if err != nil {
-							log.Println(err)
-						}
-						defer sqlThresh.Close()
-					}
-				}
-			}
-
-		}); token.Wait() && token.Error() != nil {
-			print(token.Error())
+		var wg sync.WaitGroup
+		startSubscriber := func(client mqtt.Client, topic string) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				subscribeHandler(client, topic)
+			}()
 		}
 
-		//===================================================================================================//
+		startSubscriber(client, base_topic+"/get/settop_sn/#")
+		startSubscriber(client, base_topic+"/regist/sensor/#")
+		startSubscriber(client, base_topic+"/deregist/sensor/#")
+		// wg.Add(1)
+		// go subscribeHandler(client, base_topic+"/data/threshold9/#")
+		startSubscriber(client, base_topic+"/data/frame/#")
+		startSubscriber(client, base_topic+"/data/connection/#")
+		startSubscriber(client, base_topic+"/data/status/#")
+		startSubscriber(client, base_topic+"/data/info/#")
+
+		wg.Wait()
 	})
 	//file_ delete
 	basePath := "storage_data/"
@@ -650,6 +307,25 @@ func main() {
 		Handler: cors(gwmux),
 	}
 
+	// go func() {
+	// 	for {
+	// 		log.Println("gget/connection called")
+	// 		time.Sleep(1 * time.Minute)
+
+	// 		broker_mutex.Lock()
+	// 		set_topic := base_topic + "/gget/connection"
+	// 		pub_token := client.Publish(set_topic, 1, false, "")
+
+	// 		go func() {
+	// 			_ = pub_token.Wait()
+	// 			if pub_token.Error() != nil {
+	// 				log.Println(pub_token.Error())
+	// 			}
+	// 		}()
+	// 		broker_mutex.Unlock()
+	// 	}
+	// }()
+
 	go func() {
 		log.Printf("Serving gRPC-Gateway on " + gwPortString + " port")
 		log.Fatalln(gwServer.ListenAndServeTLS(certFile, keyFile))
@@ -664,6 +340,7 @@ func main() {
 	}
 	log.Printf("Serving Image REST API on " + imPortString + " port")
 	log.Fatalln(httpServer.ListenAndServeTLS(certFile, keyFile))
+
 }
 
 func allowedOrigin(origin string) bool {
@@ -851,56 +528,374 @@ func NewTLSConfig() *tls.Config {
 
 func processMqttMessage(msg mqtt.Message, basePath string) {
 	parts := strings.Split(msg.Topic(), "/")
-	if len(parts) >= 3 {
-		serial := parts[3]
+	sensor_serial := parts[5]
+	settop_serial := parts[3]
+	mac := parts[4]
+	formattedDate := time.Now().Format("2006-01-02")
+	folderPath := filepath.Join(basePath, sensor_serial, formattedDate)
+	err := createFolder(folderPath)
+	if err != nil {
+		log.Println("Error creating folder:", err)
+		return
+	}
 
-		formattedDate := time.Now().Format("2006-01-02")
-		folderPath := filepath.Join(basePath, serial, formattedDate)
-		err := createFolder(folderPath)
-		if err != nil {
-			log.Println("Error creating folder:", err)
-			return
-		}
+	formattedTime := time.Now().Format("15:04:05")
+	fileName := formattedTime + ".raw"
+	filePath := filepath.Join(folderPath, fileName)
 
-		formattedTime := time.Now().Format("15:04:05")
-		fileName := formattedTime + ".jpg"
-		filePath := filepath.Join(folderPath, fileName)
-
-		err = saveImageToFile(filePath, msg.Payload(), serial)
-		if err != nil {
-			log.Println("Error saving image:", err)
-		} else {
-			// log.Println("Image saved:", filePath)
-		}
+	err = saveImageToFile(filePath, msg.Payload(), settop_serial, mac, sensor_serial)
+	if err != nil {
+		log.Println("Error saving image:", err)
+	} else {
+		// log.Println("Image saved:", filePath)
 	}
 }
 
-func saveImageToFile(filePath string, data []byte, sensor_serial string) error {
+func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
+	EVENT_DELAY := time.Duration(10)
+	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
+	temp_min_array, temp_max_array, err := createImageFromData(data, 60, 50, 0)
+	log.Println("temp_min_array = ", temp_min_array)
+	log.Println("temp_max_array = ", temp_max_array)
+	if err != nil {
+		return errors.New("img field not found or not a string")
+	}
+
+	cur_status := "normal"
+	for i, max_temp := range temp_max_array {
+		for _, danger_temp := range thresholds[i].GetTempDanger() {
+			if max_temp > float64(danger_temp) {
+				cur_status = "warning"
+				break
+			}
+		}
+		for _, warning_temp := range thresholds[i].GetTempWarning() {
+			if max_temp > float64(warning_temp) {
+				cur_status = "danger"
+				break
+			}
+		}
+	}
+	// log.Println(sensor_serial, "   ", "event_end_time updated to:", mEventEndTimes[sensor_serial]+int64(EVENT_DELAY), ", ", time.Now().Unix())
+
+	if mEventEndTimes[sensor_serial]+int64(EVENT_DELAY) > time.Now().Unix() { // 기존 이벤트 유지시간
+		// pub_status is not "normal" status
+		// at this point, pub_status will be "warning" or "danger"
+		// if cur_status and pub_status is a different alarm level, publish a new event.
+		if cur_status != "normal" {
+
+			if mStatus[sensor_serial] != cur_status {
+				mStatus[sensor_serial] = cur_status
+				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
+				// broker_mutex.Lock()
+				// set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+				// pub_token := client.Publish(set_topic, 1, false, cur_status)
+
+			}
+			// else { // alarm delay is added
+			// 	mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
+			// }
+		}
+	} else { // publish new event or event expired(change to "normal")
+		broker_mutex.Lock()
+
+		mEventEndTimes[sensor_serial] = time.Now().Unix()
+		switch cur_status {
+		case "normal":
+			if mStatus[sensor_serial] != "normal" {
+			}
+			break
+		case "warning":
+			fallthrough
+		case "danger":
+
+			var settop_uuid string
+			var group_uuid string
+
+			if mGroupUUIDs[sensor_serial] == nil {
+				query := fmt.Sprintf(`
+				SELECT uuid 
+				FROM settop 
+				WHERE serial = '%s'
+			`, settop_serial)
+
+				rows1, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows1.Close()
+				for rows1.Next() {
+					err := rows1.Scan(&settop_uuid)
+					if err != nil {
+						log.Println(err)
+					}
+
+					query2 := fmt.Sprintf(`
+				SELECT group_uuid 
+				FROM group_gateway 
+				WHERE settop_uuid = '%s'
+			`, settop_uuid)
+
+					rows2, err := db.Query(query2)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows2.Close()
+
+					for rows2.Next() {
+						err := rows2.Scan(&group_uuid)
+						if err != nil {
+							log.Println(err)
+						}
+						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+					}
+				}
+			}
+
+			j_frame := map[string]interface{}{
+				"status":     cur_status,
+				"group_uuid": mGroupUUIDs[sensor_serial],
+			}
+			frameJSON, _ := json.Marshal(j_frame)
+			mStatus[sensor_serial] = cur_status
+			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
+			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+			pub_token := client.Publish(set_topic, 1, false, frameJSON)
+
+			go func() {
+				_ = pub_token.Wait()
+				if pub_token.Error() != nil {
+					log.Println(pub_token.Error())
+				}
+			}()
+			break
+		}
+		broker_mutex.Unlock()
+	}
+	var minValue, maxValue float64
+	currentTime := time.Now()
+	formattedTime := currentTime.Format("2006-01-02 15:04:05")
+	var uuid = uuid.New()
+
+	for i, value := range temp_max_array {
+		if i == 0 {
+			maxValue = value
+		} else {
+			maxValue = math.Max(maxValue, value)
+		}
+	}
+
+	for i, value := range temp_min_array {
+		if i == 0 {
+			minValue = value
+		} else {
+			minValue = math.Min(minValue, value)
+		}
+	}
+	query := fmt.Sprintf(`
+						INSERT INTO history SET
+							uuid = '%s', 
+							sensor_serial = '%s',
+							min_temp = '%f',
+							max_temp = '%f',
+							date = '%s'
+						`,
+		uuid.String(), sensor_serial, minValue, maxValue, formattedTime)
+
+	sqlAddRegisterer, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	}
+	defer sqlAddRegisterer.Close()
+
+	return nil
+}
+
+func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
+	thresholdMappings, ok := thresholdMapping.GetThresholdMapping(key)
+	if ok {
+		return thresholdMappings
+	} else {
+		var sensor_uuid string
+		query := fmt.Sprintf(`
+		SELECT uuid
+		FROM sensor 
+		WHERE serial = '%s'
+		`,
+			sensor_serial)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			err := rows.Scan(&sensor_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+
+		var thresholds []*pb.Threshold
+
+		query = fmt.Sprintf(`
+		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
+			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
+			   temp_warning6, temp_danger6, temp_warning7, temp_danger7, temp_warning8,
+			   temp_danger8, temp_warning9, temp_danger9
+		FROM threshold 
+		WHERE sensor_uuid = '%s'
+		`,
+			sensor_uuid)
+
+		rows, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var tempWarning1, tempDanger1 string
+			var tempWarning2, tempDanger2 string
+			var tempWarning3, tempDanger3 string
+			var tempWarning4, tempDanger4 string
+			var tempWarning5, tempDanger5 string
+			var tempWarning6, tempDanger6 string
+			var tempWarning7, tempDanger7 string
+			var tempWarning8, tempDanger8 string
+			var tempWarning9, tempDanger9 string
+
+			if err := rows.Scan(
+				&tempWarning1, &tempDanger1,
+				&tempWarning2, &tempDanger2,
+				&tempWarning3, &tempDanger3,
+				&tempWarning4, &tempDanger4,
+				&tempWarning5, &tempDanger5,
+				&tempWarning6, &tempDanger6,
+				&tempWarning7, &tempDanger7,
+				&tempWarning8, &tempDanger8,
+				&tempWarning9, &tempDanger9,
+			); err != nil {
+				log.Println(err)
+				return nil
+			}
+
+			threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
+			thresholds = append(thresholds, threshold1)
+			threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
+			thresholds = append(thresholds, threshold2)
+			threshold3 := &pb.Threshold{TempWarning: tempWarning3, TempDanger: tempDanger3}
+			thresholds = append(thresholds, threshold3)
+			threshold4 := &pb.Threshold{TempWarning: tempWarning4, TempDanger: tempDanger4}
+			thresholds = append(thresholds, threshold4)
+			threshold5 := &pb.Threshold{TempWarning: tempWarning5, TempDanger: tempDanger5}
+			thresholds = append(thresholds, threshold5)
+			threshold6 := &pb.Threshold{TempWarning: tempWarning6, TempDanger: tempDanger6}
+			thresholds = append(thresholds, threshold6)
+			threshold7 := &pb.Threshold{TempWarning: tempWarning7, TempDanger: tempDanger7}
+			thresholds = append(thresholds, threshold7)
+			threshold8 := &pb.Threshold{TempWarning: tempWarning8, TempDanger: tempDanger8}
+			thresholds = append(thresholds, threshold8)
+			threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
+			thresholds = append(thresholds, threshold9)
+
+			thresholdMapping.AddThresholdMapping(key, thresholds)
+		}
+		return thresholds
+	}
+}
+func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_serial string) error {
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(data, &j_frame)
 	if err != nil {
 		log.Println(err)
-	}
-	if j_frame["img"] == nil {
-		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
 		return err
 	}
-	b, err := base64.StdEncoding.DecodeString(j_frame["img"].(string))
 
-	file, err := os.Create(filePath)
+	imgData, ok := j_frame["raw"].(string)
+	go publishStatus([]byte(imgData), settop_serial, mac, sensor_serial)
+	if !ok {
+		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
+		return errors.New("img field not found or not a string")
+	}
+
+	err = saveRawToFile(filePath, imgData)
+	if err != nil {
+		log.Println("Error saving raw data to file:", err)
+		return nil
+	}
+
+	// file, err := os.Create(filePath)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer file.Close()
+
+	// _, err = file.WriteString(imgData)
+	// if err != nil {
+	// 	serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
+	// 	return err
+	// }
+
+	return nil
+}
+
+func saveRawToFile(filePath string, rawBase64 string) error {
+	// 디코딩된 raw 데이터를 얻기 위해 base64 디코딩 수행
+	rawData, err := base64.StdEncoding.DecodeString(rawBase64)
+	if err != nil {
+		return err
+	}
+
+	// 파일을 미리 생성하거나 열기 (존재하면 열고, 없으면 새로 생성)
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	_, err = file.Write(b)
+	// 파일에 raw 데이터 쓰기
+	_, err = file.Write(rawData)
 	if err != nil {
-		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
 		return err
 	}
 
 	return nil
 }
+
+//mqtt image 저장
+// func saveImageToFile(filePath string, data []byte, sensor_serial string) error {
+// 	j_frame := map[string]interface{}{}
+// 	err := json.Unmarshal(data, &j_frame)
+// 	if err != nil {
+// 		log.Println(err)
+// 	}
+// 	if j_frame["img"] == nil {
+// 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
+// 		return err
+// 	}
+// 	b, err := base64.StdEncoding.DecodeString(j_frame["img"].(string))
+
+// 	file, err := os.Create(filePath)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer file.Close()
+
+// 	_, err = file.Write(b)
+// 	if err != nil {
+// 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
+// 		return err
+// 	}
+
+// 	return nil
+// }
 
 func createFolder(folderPath string) error {
 	// 폴더가 존재하지 않으면 생성
@@ -1105,4 +1100,502 @@ func serverLog(message string, unit string, sensor_serial string) {
 		log.Println(err)
 	}
 	defer sqlAddRegisterer.Close()
+}
+
+func subscribeHandler(client mqtt.Client, topic string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if token := client.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
+		payloadStr := string(msg.Payload())
+		parts := strings.Split(msg.Topic(), "/")
+		logger.Title.Printf(topic)
+
+		switch {
+		case strings.HasPrefix(topic, base_topic+"/get/settop_sn/"):
+			handleGetSettop_SN(client, parts, payloadStr)
+
+		case strings.HasPrefix(topic, base_topic+"/regist/sensor/"):
+			handleRegistSensor(client, parts, payloadStr)
+
+		case strings.HasPrefix(topic, base_topic+"/deregist/sensor/"):
+			handleDeregistSensor(client, parts)
+
+		// case strings.HasPrefix(topic, base_topic+"/data/threshold9/"):
+		// 	handleThreshold9Data(client, parts, msg.Payload())
+
+		case strings.HasPrefix(topic, base_topic+"/data/frame/"):
+			handleFrameData(client, parts, msg.Payload(), msg)
+
+		case strings.HasPrefix(topic, base_topic+"/data/connection/"):
+			handleConnectionData(client, parts, payloadStr)
+
+		case strings.HasPrefix(topic, base_topic+"/data/status/"):
+			handleStatusData(client, parts, payloadStr, msg)
+
+		case strings.HasPrefix(topic, base_topic+"/data/info/"):
+			handleInfoData(client, parts, payloadStr, msg)
+		}
+	}); token.Wait() && token.Error() != nil {
+		fmt.Println(token.Error())
+	}
+}
+
+func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
+	var settop_serial string
+	mac := parts[3]
+	query := fmt.Sprintf(`
+					SELECT serial 
+					FROM settop 
+					WHERE mac1 = '%s' OR mac2 = '%s'
+				`,
+		mac, mac)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&settop_serial)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+		}
+	}
+
+	if settop_serial == "" {
+		log.Println("err settop_serial mac : ", mac)
+		return
+	}
+	if mac == "" {
+		log.Println("err mac empty")
+		return
+	}
+	set_topic := base_topic + "/data/settop_sn/" + mac
+	message := settop_serial
+	log.Println(settop_serial)
+	pub_token := client.Publish(set_topic, 1, false, message)
+
+	go func() {
+		_ = pub_token.Wait()
+		if pub_token.Error() != nil {
+			log.Println(pub_token.Error())
+		}
+	}()
+}
+
+func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
+	currentTime := time.Now()
+	formattedTime := currentTime.Format("2006-01-02 15:04:05")
+	var settop_uuid string
+	var uuid = uuid.New()
+	settop_serial := parts[3]
+	settopMac := parts[4]
+	sensorSerial := parts[5]
+	query := fmt.Sprintf(`
+						SELECT uuid 
+						FROM settop 
+						WHERE mac1 = '%s' OR mac2 = '%s'
+					`,
+		settopMac, settopMac)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&settop_uuid)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+		}
+	}
+	if settop_uuid == "" {
+		log.Println("settop_uuid not found")
+		return
+	}
+
+	query = fmt.Sprintf(`
+						INSERT INTO sensor
+							SET uuid = '%s', 
+								settop_uuid = '%s',
+								status = '%d',
+								serial = '%s',
+								ip_address = '%s',
+								location = '%s',
+								registered_time = '%s',
+								mac = '%s',
+								name = '%s',
+								type = '%s'
+								
+						ON DUPLICATE KEY UPDATE
+							settop_uuid = VALUES(settop_uuid),
+							status = VALUES(status),
+							ip_address = VALUES(ip_address),
+							location = VALUES(location),
+							registered_time = VALUES(registered_time),
+							mac = VALUES(mac),
+							type = VALUES(type)
+					`,
+		uuid.String(), settop_uuid, 0,
+		sensorSerial, "", "",
+		formattedTime, settopMac, sensorSerial, payloadStr,
+	)
+
+	sqlAddSensor, err := db.Query(query)
+
+	if err != nil {
+		log.Println(err)
+	}
+	mainListMapping = NewMainListResponseMapping()
+	initThreshold9Data(uuid.String())
+	defer sqlAddSensor.Close()
+	serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
+
+	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
+	message := "info"
+	pub_token := client.Publish(set_topic, 1, false, message)
+
+	go func() {
+		_ = pub_token.Wait()
+		if pub_token.Error() != nil {
+			log.Println(pub_token.Error())
+		}
+	}()
+}
+
+func handleDeregistSensor(client mqtt.Client, parts []string) {
+	sensorSerial := parts[5]
+	query := fmt.Sprintf(`
+					UPDATE sensor SET
+						status = '%d'
+					WHERE serial = '%s'
+					`,
+		3, sensorSerial)
+
+	_, err := db.Exec(query)
+	if err != nil {
+		log.Println(err)
+		// gRPC 오류를 생성하여 상태 코드 설정
+	}
+	mainListMapping = NewMainListResponseMapping()
+	serverLog("센서의 연결이 끊어졌습니다.", "web", sensorSerial)
+}
+
+func initThreshold9Data(sensor_uuid string) {
+	query := fmt.Sprintf(`
+			INSERT IGNORE INTO threshold SET
+				sensor_uuid = '%s', 
+				temp_warning1 = '%s',
+				temp_danger1 = '%s',
+				temp_warning2 = '%s',
+				temp_danger2 = '%s',
+				temp_warning3 = '%s',
+				temp_danger3 = '%s',
+				temp_warning4 = '%s',
+				temp_danger4 = '%s',
+				temp_warning5 = '%s',
+				temp_danger5 = '%s',
+				temp_warning6 = '%s',
+				temp_danger6 = '%s',
+				temp_warning7 = '%s',
+				temp_danger7 = '%s',
+				temp_warning8 = '%s',
+				temp_danger8 = '%s',
+				temp_warning9 = '%s',
+				temp_danger9 = '%s'
+			`,
+		sensor_uuid, strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100),
+		strconv.Itoa(60), strconv.Itoa(100))
+	sqlThresh, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer sqlThresh.Close()
+}
+
+func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqtt.Message) {
+	basePath := "storage_data/"
+	log.Println("handleFrameData called")
+	processMqttMessage(msg, basePath)
+	var decodedData map[string]interface{}
+	err := json.Unmarshal(msg.Payload(), &decodedData)
+	if err != nil {
+		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
+		fmt.Println("JSON decoding error:", err)
+		return
+	}
+}
+
+func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
+	isAlive, err := strconv.Atoi(payloadStr)
+
+	settop_serial := parts[3]
+	var settop_uuid string
+	query := fmt.Sprintf(`
+		UPDATE settop SET
+			is_alive = '%d'
+		WHERE serial = '%s'
+		`,
+		isAlive, settop_serial)
+
+	if isAlive == 0 {
+		query := fmt.Sprintf(`
+				SELECT uuid 
+				FROM settop 
+				WHERE serial = '%s'
+			`,
+			settop_serial)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&settop_uuid)
+			if err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+			}
+			query = fmt.Sprintf(`
+			UPDATE sensor SET
+				status = '%d'
+			WHERE settop_uuid = '%s'
+			`,
+				3, settop_uuid)
+			_, err = db.Exec(query)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
+
+	_, err = db.Exec(query)
+	if err != nil {
+		log.Println(err)
+	}
+	mainListMapping = NewMainListResponseMapping()
+}
+
+func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
+	currentTime := time.Now()
+	formattedTime := currentTime.Format("2006-01-02 15:04:05")
+	var uuid = uuid.New()
+	var sensor_type sql.NullString
+	settop_serial := parts[3]
+	sensor_serial := parts[5]
+	query := fmt.Sprintf(`
+			SELECT type 
+			FROM sensor 
+			WHERE serial = '%s'
+		`,
+		sensor_serial)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_type)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	j_frame := map[string]interface{}{}
+	err = json.Unmarshal(msg.Payload(), &j_frame)
+	var status string
+	if err != nil {
+		log.Println(err)
+		log.Println("status json err")
+		status = string(msg.Payload())
+	} else {
+		status, _ = j_frame["status"].(string)
+	}
+
+	var result = 0
+	if string(status) == "normal" {
+		result = 0
+	} else if string(status) == "warning" {
+		result = 1
+	} else if string(status) == "danger" {
+		result = 2
+	} else if string(status) == "inspection" {
+		result = 3
+	}
+	message := eventMessage(settop_serial, getNullStringValidValue(sensor_type), result, sensor_serial)
+	var settop_uuid string
+	var group_uuid string
+	query = fmt.Sprintf(`
+		SELECT uuid 
+		FROM settop 
+		WHERE serial = '%s'
+	`, settop_serial)
+
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&settop_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+
+		query2 := fmt.Sprintf(`
+				SELECT group_uuid 
+				FROM group_gateway 
+				WHERE settop_uuid = '%s'
+			`, settop_uuid)
+
+		rows2, err := db.Query(query2)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows2.Close()
+
+		for rows2.Next() {
+			err := rows2.Scan(&group_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+			SendMessageHandler("Trusafer", message, "style", group_uuid)
+		}
+	}
+
+	query = fmt.Sprintf(`
+		INSERT INTO log SET
+			uuid = '%s', 
+			unit = '%s',
+			message = '%s',
+			sensor_serial = '%s',
+			registered_time = '%s'
+		`,
+		uuid.String(), "mobile", message, sensor_serial, formattedTime)
+
+	sqlAddRegisterer, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer sqlAddRegisterer.Close()
+
+	sensorSerial := parts[5]
+	query = fmt.Sprintf(`
+		UPDATE sensor SET
+			status = '%d'
+		WHERE serial = '%s'
+		`,
+		result, sensorSerial)
+
+	_, err = db.Exec(query)
+	if err != nil {
+		log.Println(err)
+	}
+	mainListMapping = NewMainListResponseMapping()
+}
+
+func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
+	j_frame := map[string]interface{}{}
+	err := json.Unmarshal(msg.Payload(), &j_frame)
+	if err != nil {
+		log.Println(err)
+	}
+
+	fw_version, _ := j_frame["fw_version"].(string)
+
+	settop_serial := parts[3]
+	query := fmt.Sprintf(`
+		UPDATE settop SET
+			fw_version = '%s'
+		WHERE serial = '%s'
+		`,
+		fw_version, settop_serial)
+
+	_, err = db.Exec(query)
+	if err != nil {
+		log.Println(err)
+	}
+	mainListMapping = NewMainListResponseMapping()
+}
+
+func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, error) {
+	min := 255.
+	max := 0.
+
+	TEMP_MIN := 174.7
+
+	// y 0~16, y 17~33, y 34~49,
+	// x 0~19, 20~39, 40~59
+	min_arr := [9]float64{999, 999, 999, 999, 999, 999, 999, 999, 999}
+	max_arr := [9]float64{0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+	for y := 0; y < height-startRow; y++ {
+		for x := 0; x < width; x++ {
+			index := ((startRow+y)*width + x) * 2
+			pixelData := data[index : index+2]
+
+			rawValue := binary.BigEndian.Uint16(pixelData)
+			temp := ((float64(rawValue)-2047)/10. + 30) + TEMP_MIN
+
+			// find global min/max
+			if temp < min {
+				min = temp
+			}
+			if temp > max {
+				max = temp
+			}
+
+			// find 9 area min/max
+			var row int
+			if y < int(math.Round(float64(height/3.))) {
+				row = 0
+			} else if y < int(math.Round(float64(height*2/3.))) {
+				row = 1
+			} else {
+				row = 2
+			}
+
+			idx := 0
+			if x < int(math.Round(float64(width/3.))) {
+				idx = row * 3
+			} else if x < int(math.Round(float64(width*2/3.))) {
+				idx = row*3 + 1
+			} else {
+				idx = row*3 + 2
+			}
+
+			if max_arr[idx] < temp {
+				max_arr[idx] = temp
+			}
+			if min_arr[idx] > temp {
+				min_arr[idx] = temp
+			}
+		}
+	}
+
+	for i, value := range max_arr {
+		max_arr[i] = math.Round((value-TEMP_MIN)*10) / 10
+	}
+	for i, value := range min_arr {
+		min_arr[i] = math.Round((value-TEMP_MIN)*10) / 10
+	}
+
+	return min_arr, max_arr, nil
 }

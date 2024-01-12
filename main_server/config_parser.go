@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var Conf Config
+
 type Config struct {
 	Grpc struct {
 		Port     int    `json:"port"`
@@ -47,17 +49,19 @@ type Config struct {
 		SecretKeyRT     string        `json:"secret_key_rt"`
 		TokenDurationRT time.Duration `json:"token_duration_rt"`
 	} `json:"jwt"`
+	Encryption struct {
+		Passphrase string `json:"passphrase"`
+	} `json:"encryption"`
 }
 
-func LoadConfiguration(file string) (Config, error) {
-	var conf Config
+func LoadConfiguration(file string) error {
 	configFile, err := os.Open(file)
 	defer configFile.Close()
 	if err != nil {
 		fmt.Println(err.Error())
-		return conf, err
+		return err
 	}
 	jsonParser := json.NewDecoder(configFile)
-	jsonParser.Decode(&conf)
-	return conf, nil
+	jsonParser.Decode(&Conf)
+	return nil
 }

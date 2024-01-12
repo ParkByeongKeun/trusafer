@@ -33,14 +33,15 @@ func createDBTablesIfNotExist() error {
 	// create history
 	query = fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS history (
+			id int(11) NOT NULL AUTO_INCREMENT,
 			uuid VARCHAR(36) NOT NULL,
 			sensor_serial VARCHAR(36) DEFAULT NULL,
 			min_temp FLOAT NOT NULL,
 			max_temp FLOAT NOT NULL,
 			date datetime NOT NULL,
-			PRIMARY KEY (uuid),
-			KEY fk_history_trusafer (uuid)
-		) ENGINE=InnoDB AUTO_INCREMENT=261 DEFAULT CHARSET=utf8mb4;
+			PRIMARY KEY (id),
+			KEY fk_history_trusafer (id)
+		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
 	sqlCreateHistory, err := db.Query(query)
 	if err != nil {
@@ -60,8 +61,7 @@ func createDBTablesIfNotExist() error {
 			status smallint(5) unsigned DEFAULT 0,
 			is_alarm int(11) NOT NULL,
 			permission_uuid VARCHAR(36) DEFAULT NULL, 
-			name varchar(20) NOT NULL,
-			group_uuid VARCHAR(36) DEFAULT NULL, 
+			name varchar(20) NOT NULL, 
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
@@ -83,7 +83,7 @@ func createDBTablesIfNotExist() error {
 			mac1 varchar(255) DEFAULT NULL,
 			mac2 varchar(255) DEFAULT NULL,
 			is_alive int(11) DEFAULT NULL,
-			latest_version varchar(255) DEFAULT NULL,
+			fw_version varchar(255) DEFAULT NULL,
 			registered_time datetime DEFAULT NULL,
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
@@ -104,10 +104,10 @@ func createDBTablesIfNotExist() error {
 			serial varchar(255) UNIQUE DEFAULT NULL,
 			ip_address varchar(255) DEFAULT NULL,
 			location varchar(255) DEFAULT NULL,
-			latest_version varchar(255) DEFAULT NULL,
 			registered_time datetime DEFAULT NULL,
 			mac varchar(255) DEFAULT NULL,
 			name varchar(255) DEFAULT NULL,
+			type varchar(36) DEFAULT NULL,
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
@@ -171,8 +171,7 @@ func createDBTablesIfNotExist() error {
 		CREATE TABLE IF NOT EXISTS group_gateway (
 			group_uuid VARCHAR(36) NOT NULL,
 			registerer_uuid VARCHAR(36) DEFAULT NULL,
-			settop_uuid VARCHAR(36) DEFAULT NULL,
-			PRIMARY KEY (group_uuid)
+			settop_uuid VARCHAR(36) DEFAULT NULL 
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
 	sqlCreateGroup, err = db.Query(query)
@@ -185,12 +184,13 @@ func createDBTablesIfNotExist() error {
 
 	query = fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS log (
+			id int(11) NOT NULL AUTO_INCREMENT,
 			uuid VARCHAR(36) NOT NULL,
 			unit VARCHAR(36) NOT NULL,
 			sensor_serial VARCHAR(36) NOT NULL,
 			message varchar(255) DEFAULT NULL,
 			registered_time datetime DEFAULT NULL,
-			PRIMARY KEY (uuid)
+			PRIMARY KEY (id)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
 	sqlCreateLog, err := db.Query(query)
@@ -207,7 +207,7 @@ func createDBTablesIfNotExist() error {
 		name varchar(255) UNIQUE DEFAULT NULL,
 		user int(11) NOT NULL,
 		permission int(11) NOT NULL,
-		sensor_create int(11) NOT NULL,
+		settop_create int(11) NOT NULL,
 		sensor_info int(11) NOT NULL,
 		ip_module int(11) NOT NULL,
 		threshold int(11) NOT NULL,
@@ -222,6 +222,22 @@ func createDBTablesIfNotExist() error {
 	}
 	log.Println(" - permission table OK")
 	defer sqlCreatePermission.Close()
+
+	query = fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS firebase_token (
+			token VARCHAR(255) NOT NULL,
+			group_uuid VARCHAR(36) NOT NULL,
+			email VARCHAR(255) DEFAULT NULL 
+		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	`)
+	sqlCreateGroup, err = db.Query(query)
+	if err != nil {
+		log.Printf(" - create firebase_token table err: %s", err)
+		return err
+	}
+	log.Println(" - group table OK")
+	defer sqlCreateGroup.Close()
+
 	initPermission()
 	return nil
 }
@@ -231,6 +247,7 @@ func initPermission() {
 	uuidMiddle1 := uuid.New()
 	uuidMiddle2 := uuid.New()
 	uuidUser := uuid.New()
+	uuidMaster := uuid.New()
 
 	var count int
 	countQuery := "SELECT COUNT(*) FROM permission"
@@ -241,8 +258,9 @@ func initPermission() {
 	}
 	if count == 0 {
 		insertQuery := fmt.Sprintf(`
-			INSERT INTO permission (uuid, name, user, permission, sensor_create, sensor_info, ip_module, threshold, sensor_history)
+			INSERT INTO permission (uuid, name, user, permission, settop_create, sensor_info, ip_module, threshold, sensor_history)
 			VALUES 
+			('%s', '%s', %d, %d, %d, %d, %d, %d, %d),
 			('%s', '%s', %d, %d, %d, %d, %d, %d, %d),
 			('%s', '%s', %d, %d, %d, %d, %d, %d, %d),
 			('%s', '%s', %d, %d, %d, %d, %d, %d, %d),
@@ -252,6 +270,7 @@ func initPermission() {
 			uuidMiddle1.String(), "중간계층1", 1, 1, 1, 1, 1, 1, 1,
 			uuidMiddle2.String(), "중간계층2", 0, 0, 1, 1, 1, 1, 1,
 			uuidUser.String(), "사용자", 0, 0, 0, 0, 0, 0, 1,
+			uuidMaster.String(), "master", 1, 1, 1, 1, 1, 1, 1,
 		)
 
 		_, err := db.Exec(insertQuery)

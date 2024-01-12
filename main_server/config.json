@@ -32,11 +32,14 @@
     },
     "log": {
         "dir": "logs",
-        "file": "authserver.log",
+        "file": "mqtt.log",
         "max_size": 10,
         "max_backups": 6,
         "max_age": 30,
         "local_time": true,
         "compress": false
+      },
+      "encryption": {
+        "passphrase": "passphrase"
       }
 }
