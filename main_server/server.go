@@ -76,6 +76,12 @@ func init() {
 	mStatus = make(map[string]string)
 }
 
+var mImageStatus map[string]string
+
+func init() {
+	mImageStatus = make(map[string]string)
+}
+
 var mGroupUUIDs map[string][]string
 
 func init() {
@@ -128,7 +134,6 @@ func initApp() {
 }
 
 func main() {
-	log.Println("ver1")
 	rand.Seed(time.Now().UnixNano())
 	initApp()
 	// conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
@@ -161,7 +166,7 @@ func main() {
 	saveImageDir = Conf.Etc.SaveImageDir
 	gwPort := Conf.Gw.Port
 	imPort := Conf.Im.Port
-	// secret_key_rt := Conf.Jwt.SecretKeyRT
+	// secret_key_rt := Conf.Jwt.SecretKeyRTrf crtuy
 	secret_key_at := Conf.Jwt.SecretKeyAT
 	token_duration_at := Conf.Jwt.TokenDurationAT
 	// token_duration_rt := Conf.Jwt.TokenDurationRT
@@ -178,6 +183,7 @@ func main() {
 	mqtt_serial := RandomString(15)
 	username := "ijoon"
 	password := "vXH5iVMqTfXB"
+	// password := "9DGQhyCH6RZ4"
 	base_topic = "trusafer"
 	opts1 := mqtt.NewClientOptions().AddBroker(broker)
 
@@ -252,27 +258,18 @@ func main() {
 	}
 
 	opts := []grpc.ServerOption{}
-
-	// 액세스 토큰을 위한 JWTManager 및 AuthInterceptor
 	jwtManagerAT := service.NewJWTManager(secret_key_at, token_duration_at)
 	interceptorAT := service.NewAuthInterceptor(jwtManagerAT, accessibleRolesForRT())
 	opts = append(opts, grpc.Creds(creds))
 	opts = append(opts, grpc.UnaryInterceptor(interceptorAT.Unary()))
 
 	grpcServer := grpc.NewServer()
-
-	// gRPC 서버 네트워크 연결 대기
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
 	pb.RegisterMainControlServer(grpcServer, &server{})
-
-	// log.Printf("start gRPC server on %d port", grpcPort)
-	// if err := grpcServer.Serve(lis); err != nil {
-	// 	log.Fatalf("failed to serve: %s", err)
-	// }
 
 	go func() {
 		log.Printf("Serving gRPC server on %d port", grpcPort)
@@ -307,24 +304,24 @@ func main() {
 		Handler: cors(gwmux),
 	}
 
-	// go func() {
-	// 	for {
-	// 		log.Println("gget/connection called")
-	// 		time.Sleep(1 * time.Minute)
+	go func() {
+		for {
+			log.Println("gget/connection called")
+			time.Sleep(30 * time.Second)
 
-	// 		broker_mutex.Lock()
-	// 		set_topic := base_topic + "/gget/connection"
-	// 		pub_token := client.Publish(set_topic, 1, false, "")
+			broker_mutex.Lock()
+			set_topic := base_topic + "/gget/connection"
+			client.Publish(set_topic, 1, false, "")
 
-	// 		go func() {
-	// 			_ = pub_token.Wait()
-	// 			if pub_token.Error() != nil {
-	// 				log.Println(pub_token.Error())
-	// 			}
-	// 		}()
-	// 		broker_mutex.Unlock()
-	// 	}
-	// }()
+			// go func() {
+			// 	_ = pub_token.Wait()
+			// 	if pub_token.Error() != nil {
+			// 		log.Println(pub_token.Error())
+			// 	}
+			// }()
+			broker_mutex.Unlock()
+		}
+	}()
 
 	go func() {
 		log.Printf("Serving gRPC-Gateway on " + gwPortString + " port")
@@ -375,9 +372,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		err := os.MkdirAll(userFolder, os.ModePerm)
 		if err != nil {
 			log.Println("error creating user folder", err)
-
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -467,64 +462,29 @@ func RandomString(n int) string {
 }
 
 func NewTLSConfig() *tls.Config {
-	// Import trusted certificates from CAfile.pem.
-	// Alternatively, manually add CA certificates to
-	// default openssl CA bundle.
 	certpool := x509.NewCertPool()
 	pemCerts, err := ioutil.ReadFile("cert/rootca.crt")
 	if err == nil {
 		certpool.AppendCertsFromPEM(pemCerts)
 	} else {
 	}
-
-	// Import client certificate/key pair
-	// cert, err := tls.LoadX509KeyPair("cert/client-crt.pem", "cert/client-key.pem")
 	cert, err := tls.LoadX509KeyPair("cert/server.crt", "cert/private.pem")
 	if err != nil {
 		panic(err)
 	}
 
-	// Just to print out the client certificate..
 	cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
 		panic(err)
 	}
-	// fmt.Println(cert.Leaf)
-
-	// Create tls.Config with desired tls properties
 	return &tls.Config{
-		// RootCAs = certs used to verify server cert.
-		RootCAs: certpool,
-		// ClientAuth = whether to request cert from server.
-		// Since the server is set up for SSL, this happens
-		// anyways.
-		ClientAuth: tls.NoClientCert,
-		// ClientCAs = certs used to validate client cert.
-		ClientCAs: nil,
-		// InsecureSkipVerify = verify that cert contents
-		// match server. IP matches what is in cert etc.
+		RootCAs:            certpool,
+		ClientAuth:         tls.NoClientCert,
+		ClientCAs:          nil,
 		InsecureSkipVerify: true,
-		// Certificates = list of certs client sends to server.
-		Certificates: []tls.Certificate{cert},
+		Certificates:       []tls.Certificate{cert},
 	}
 }
-
-// func saveImagesPeriodically(client mqtt.Client, topics []string, basePath string) {
-// 	ticker := time.NewTicker(10 * time.Second) // 10초마다 실행
-// 	for {
-// 		select {
-// 		case <-ticker.C:
-// 			for _, topic := range topics {
-// 				token := client.Subscribe(topic, 2, func(client mqtt.Client, msg mqtt.Message) {
-// 					processMqttMessage(msg, basePath)
-// 				})
-// 				if token.Wait() && token.Error() != nil {
-// 					log.Println("Error subscribing to topic:", token.Error())
-// 				}
-// 			}
-// 		}
-// 	}
-// }
 
 func processMqttMessage(msg mqtt.Message, basePath string) {
 	parts := strings.Split(msg.Topic(), "/")
@@ -552,62 +512,176 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 }
 
 func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
+	broker_mutex.Lock()
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	temp_min_array, temp_max_array, err := createImageFromData(data, 60, 50, 0)
-	log.Println("temp_min_array = ", temp_min_array)
-	log.Println("temp_max_array = ", temp_max_array)
 	if err != nil {
 		return errors.New("img field not found or not a string")
 	}
 
-	cur_status := "normal"
+	mImageStatus[sensor_serial] = "normal"
+
 	for i, max_temp := range temp_max_array {
-		for _, danger_temp := range thresholds[i].GetTempDanger() {
-			if max_temp > float64(danger_temp) {
-				cur_status = "warning"
-				break
-			}
+		tempWarningStr := thresholds[i].GetTempWarning()
+		tempDangerStr := thresholds[i].GetTempDanger()
+
+		tempDangerFloat, _ := strconv.ParseFloat(tempDangerStr, 64)
+		tempWarningFloat, _ := strconv.ParseFloat(tempWarningStr, 64)
+		// for _, warning_temp := range thresholds[i].GetTempWarning() {
+		if float64(max_temp) > tempWarningFloat {
+			mImageStatus[sensor_serial] = "warning"
+			// log.Println("tempWarningFloat = ", tempWarningFloat)
+			// break
 		}
-		for _, warning_temp := range thresholds[i].GetTempWarning() {
-			if max_temp > float64(warning_temp) {
-				cur_status = "danger"
-				break
-			}
+		// }
+		// for _, danger_temp := range thresholds[i].GetTempDanger() {
+		if float64(max_temp) > tempDangerFloat {
+			mImageStatus[sensor_serial] = "danger"
+			// log.Println("tempDangerFloat = ", tempDangerFloat)
+
+			// break
 		}
+		// }
 	}
-	// log.Println(sensor_serial, "   ", "event_end_time updated to:", mEventEndTimes[sensor_serial]+int64(EVENT_DELAY), ", ", time.Now().Unix())
 
+	// log.Println(sensor_serial, "   ", "event_end_time updated to:", mEventEndTimes[sensor_serial]+int64(EVENT_DELAY), ", ", time.Now().Unix(), "mImageStatus[sensor_serial] = ", mImageStatus[sensor_serial])
 	if mEventEndTimes[sensor_serial]+int64(EVENT_DELAY) > time.Now().Unix() { // 기존 이벤트 유지시간
-		// pub_status is not "normal" status
-		// at this point, pub_status will be "warning" or "danger"
-		// if cur_status and pub_status is a different alarm level, publish a new event.
-		if cur_status != "normal" {
-
-			if mStatus[sensor_serial] != cur_status {
-				mStatus[sensor_serial] = cur_status
+		if mImageStatus[sensor_serial] != "normal" {
+			if mStatus[sensor_serial] != mImageStatus[sensor_serial] {
+				mStatus[sensor_serial] = mImageStatus[sensor_serial]
 				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
-				// broker_mutex.Lock()
-				// set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-				// pub_token := client.Publish(set_topic, 1, false, cur_status)
+				var settop_uuid string
+				var group_uuid string
 
+				if mGroupUUIDs[sensor_serial] == nil {
+					query := fmt.Sprintf(`
+					SELECT uuid 
+					FROM settop 
+					WHERE serial = '%s'
+				`, settop_serial)
+
+					rows1, err := db.Query(query)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows1.Close()
+					for rows1.Next() {
+						err := rows1.Scan(&settop_uuid)
+						if err != nil {
+							log.Println(err)
+						}
+
+						query2 := fmt.Sprintf(`
+							SELECT group_uuid 
+							FROM group_gateway 
+							WHERE settop_uuid = '%s'
+						`, settop_uuid)
+
+						rows2, err := db.Query(query2)
+						if err != nil {
+							log.Println(err)
+						}
+						defer rows2.Close()
+
+						for rows2.Next() {
+							err := rows2.Scan(&group_uuid)
+							if err != nil {
+								log.Println(err)
+							}
+							mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+						}
+					}
+				}
+
+				j_frame := map[string]interface{}{
+					"status":     mImageStatus[sensor_serial],
+					"group_uuid": mGroupUUIDs[sensor_serial],
+				}
+				frameJSON, _ := json.Marshal(j_frame)
+				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+				client.Publish(set_topic, 1, false, frameJSON)
+
+				// go func() {
+				// 	_ = pub_token.Wait()
+				// 	if pub_token.Error() != nil {
+				// 		log.Println(pub_token.Error())
+				// 	}
+				// }()
+			} else { // alarm delay is added
+				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			}
-			// else { // alarm delay is added
-			// 	mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
-			// }
 		}
 	} else { // publish new event or event expired(change to "normal")
-		broker_mutex.Lock()
-
-		mEventEndTimes[sensor_serial] = time.Now().Unix()
-		switch cur_status {
+		switch mImageStatus[sensor_serial] {
 		case "normal":
-			if mStatus[sensor_serial] != "normal" {
+			if mStatus[sensor_serial] != "normal" && mEventEndTimes[sensor_serial] > 11 {
+				mStatus[sensor_serial] = "normal"
+				// mEventEndTimes = make(map[string]int64)
+				var settop_uuid string
+				var group_uuid string
+				if mGroupUUIDs[sensor_serial] == nil {
+					query := fmt.Sprintf(`
+					SELECT uuid 
+					FROM settop 
+					WHERE serial = '%s'
+				`, settop_serial)
+
+					rows1, err := db.Query(query)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows1.Close()
+					for rows1.Next() {
+						err := rows1.Scan(&settop_uuid)
+						if err != nil {
+							log.Println(err)
+						}
+
+						query2 := fmt.Sprintf(`
+							SELECT group_uuid 
+							FROM group_gateway 
+							WHERE settop_uuid = '%s'
+						`, settop_uuid)
+
+						rows2, err := db.Query(query2)
+						if err != nil {
+							log.Println(err)
+						}
+						defer rows2.Close()
+
+						for rows2.Next() {
+							err := rows2.Scan(&group_uuid)
+							if err != nil {
+								log.Println(err)
+							}
+							mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+						}
+					}
+				}
+
+				j_frame := map[string]interface{}{
+					"status":     mImageStatus[sensor_serial],
+					"group_uuid": mGroupUUIDs[sensor_serial],
+				}
+				frameJSON, _ := json.Marshal(j_frame)
+				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+				client.Publish(set_topic, 1, false, frameJSON)
+				// go func() {
+
+				// 	_ = pub_token.Wait()
+				// 	if pub_token.Error() != nil {
+				// 		log.Println(pub_token.Error())
+				// 	}
+
+				// }()
 			}
 			break
 		case "warning":
 			fallthrough
 		case "danger":
+			mStatus[sensor_serial] = mImageStatus[sensor_serial]
+			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 
 			var settop_uuid string
 			var group_uuid string
@@ -631,10 +705,10 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					}
 
 					query2 := fmt.Sprintf(`
-				SELECT group_uuid 
-				FROM group_gateway 
-				WHERE settop_uuid = '%s'
-			`, settop_uuid)
+						SELECT group_uuid 
+						FROM group_gateway 
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
 
 					rows2, err := db.Query(query2)
 					if err != nil {
@@ -650,27 +724,27 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 					}
 				}
-			}
 
+			}
 			j_frame := map[string]interface{}{
-				"status":     cur_status,
+				"status":     mImageStatus[sensor_serial],
 				"group_uuid": mGroupUUIDs[sensor_serial],
 			}
 			frameJSON, _ := json.Marshal(j_frame)
-			mStatus[sensor_serial] = cur_status
-			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-			pub_token := client.Publish(set_topic, 1, false, frameJSON)
+			client.Publish(set_topic, 1, false, frameJSON)
 
-			go func() {
-				_ = pub_token.Wait()
-				if pub_token.Error() != nil {
-					log.Println(pub_token.Error())
-				}
-			}()
+			// go func() {
+			// 	log.Println("333333")
+			// 	_ = pub_token.Wait()
+			// 	if pub_token.Error() != nil {
+			// 		log.Println(pub_token.Error())
+			// 	}
+
+			// }()
+
 			break
 		}
-		broker_mutex.Unlock()
 	}
 	var minValue, maxValue float64
 	currentTime := time.Now()
@@ -693,21 +767,21 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		}
 	}
 	query := fmt.Sprintf(`
-						INSERT INTO history SET
-							uuid = '%s', 
-							sensor_serial = '%s',
-							min_temp = '%f',
-							max_temp = '%f',
-							date = '%s'
-						`,
+		INSERT INTO history SET
+			uuid = '%s', 
+			sensor_serial = '%s',
+			min_temp = '%f',
+			max_temp = '%f',
+			date = '%s'
+		`,
 		uuid.String(), sensor_serial, minValue, maxValue, formattedTime)
 
 	sqlAddRegisterer, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
 	defer sqlAddRegisterer.Close()
+	broker_mutex.Unlock()
 
 	return nil
 }
@@ -719,16 +793,15 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 	} else {
 		var sensor_uuid string
 		query := fmt.Sprintf(`
-		SELECT uuid
-		FROM sensor 
-		WHERE serial = '%s'
-		`,
+			SELECT uuid
+			FROM sensor 
+			WHERE serial = '%s'
+			`,
 			sensor_serial)
 
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil
 		}
 		defer rows.Close()
@@ -743,19 +816,18 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 		var thresholds []*pb.Threshold
 
 		query = fmt.Sprintf(`
-		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
-			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
-			   temp_warning6, temp_danger6, temp_warning7, temp_danger7, temp_warning8,
-			   temp_danger8, temp_warning9, temp_danger9
-		FROM threshold 
-		WHERE sensor_uuid = '%s'
-		`,
+			SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
+				temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
+				temp_warning6, temp_danger6, temp_warning7, temp_danger7, temp_warning8,
+				temp_danger8, temp_warning9, temp_danger9
+			FROM threshold 
+			WHERE sensor_uuid = '%s'
+			`,
 			sensor_uuid)
 
 		rows, err = db.Query(query)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil
 		}
 		defer rows.Close()
@@ -818,49 +890,25 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 		return err
 	}
 
-	imgData, ok := j_frame["raw"].(string)
-	go publishStatus([]byte(imgData), settop_serial, mac, sensor_serial)
-	if !ok {
-		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
-		return errors.New("img field not found or not a string")
-	}
+	imgData, _ := base64.StdEncoding.DecodeString(j_frame["raw"].(string))
+
+	go publishStatus(imgData, settop_serial, mac, sensor_serial)
 
 	err = saveRawToFile(filePath, imgData)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
 		return nil
 	}
-
-	// file, err := os.Create(filePath)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer file.Close()
-
-	// _, err = file.WriteString(imgData)
-	// if err != nil {
-	// 	serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
-	// 	return err
-	// }
-
 	return nil
 }
 
-func saveRawToFile(filePath string, rawBase64 string) error {
-	// 디코딩된 raw 데이터를 얻기 위해 base64 디코딩 수행
-	rawData, err := base64.StdEncoding.DecodeString(rawBase64)
-	if err != nil {
-		return err
-	}
-
-	// 파일을 미리 생성하거나 열기 (존재하면 열고, 없으면 새로 생성)
+func saveRawToFile(filePath string, rawData []byte) error {
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	// 파일에 raw 데이터 쓰기
 	_, err = file.Write(rawData)
 	if err != nil {
 		return err
@@ -868,34 +916,6 @@ func saveRawToFile(filePath string, rawBase64 string) error {
 
 	return nil
 }
-
-//mqtt image 저장
-// func saveImageToFile(filePath string, data []byte, sensor_serial string) error {
-// 	j_frame := map[string]interface{}{}
-// 	err := json.Unmarshal(data, &j_frame)
-// 	if err != nil {
-// 		log.Println(err)
-// 	}
-// 	if j_frame["img"] == nil {
-// 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
-// 		return err
-// 	}
-// 	b, err := base64.StdEncoding.DecodeString(j_frame["img"].(string))
-
-// 	file, err := os.Create(filePath)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer file.Close()
-
-// 	_, err = file.Write(b)
-// 	if err != nil {
-// 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E02)", "web", sensor_serial)
-// 		return err
-// 	}
-
-// 	return nil
-// }
 
 func createFolder(folderPath string) error {
 	// 폴더가 존재하지 않으면 생성
@@ -914,12 +934,15 @@ func createFolder(folderPath string) error {
 }
 
 func deleteOldImages(basePath string) {
-	ticker := time.NewTicker(8 * 24 * time.Hour) // 24시간마다 실행
-	// ticker := time.NewTicker(10 * time.Second) // 3초마다 실행
+	ticker := time.NewTicker(7 * 24 * time.Hour) // 24시간마다 실행
+	// ticker := time.NewTicker(10 * time.Second) //test
 
 	for {
 		select {
 		case <-ticker.C:
+			// history 삭제 (7주일 보관)==
+			deleteOldDataWithTransaction(db)
+
 			// basePath 아래의 모든 폴더 검색
 			folders, err := getFolders(basePath)
 			if err != nil {
@@ -950,6 +973,34 @@ func getFolders(basePath string) ([]string, error) {
 	return folders, nil
 }
 
+func deleteOldDataWithTransaction(db *sql.DB) error {
+	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
+	formattedSevenDaysAgo := sevenDaysAgo.Format("2006-01-02 15:04:05")
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	deleteQuery := fmt.Sprintf(`
+			DELETE FROM history
+			WHERE date < '%s'
+		`, formattedSevenDaysAgo)
+
+	_, err = tx.Exec(deleteQuery)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func deleteOldImagesInFolder(folderPath string) {
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -972,7 +1023,6 @@ func deleteOldImagesInFolder(folderPath string) {
 		log.Println("Error deleting old images in folder:", err)
 	}
 
-	// 폴더 삭제
 	err = os.RemoveAll(folderPath)
 	if err != nil {
 		fmt.Println("Error deleting folder:", err)
@@ -983,35 +1033,6 @@ func deleteOldImagesInFolder(folderPath string) {
 
 func SendMessageHandler(title string, body string, style string, topic string) {
 	firebaseutil.SendMessage(title, body, style, topic)
-}
-
-func checkSensorData(data SensorData) int {
-	hasDanger := false
-	hasWarning := false
-
-	for _, value := range data.Danger {
-		if value {
-			hasDanger = true
-			break
-		}
-	}
-
-	for _, value := range data.Warning {
-		if value {
-			hasWarning = true
-			break
-		}
-	}
-
-	if hasDanger && hasWarning {
-		return 2
-	} else if hasWarning {
-		return 1
-	} else if hasDanger {
-		return 2
-	} else {
-		return 0
-	}
 }
 
 func eventMessage(settop_serial string, sensor_type string, level_temp int, sensor_serial string) string {
@@ -1073,9 +1094,15 @@ func eventMessage(settop_serial string, sensor_type string, level_temp int, sens
 		lev = "이상징후 (점검)"
 		serverLog("이상징후가 발견되었습니다. (점검)", "anomaly", sensor_serial)
 	}
-	message = msg_formattedTime + " " + place_name + " " + floor + "에 설치된 " + room + " " + sensor_type + " 센서에서 " + lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
+	var checkEmptyPlace string
+	if place_name == "" && floor == "" {
+		checkEmptyPlace = ""
+	} else {
+		checkEmptyPlace = place_name + " " + floor + "에 설치된 "
+	}
+	message = msg_formattedTime + " " + checkEmptyPlace + room + " " + sensor_type + " 센서에서 " + lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
 	if level_temp == 0 {
-		message = msg_formattedTime + " " + place_name + " " + floor + "에 설치된 " + room + " " + sensor_type + " 센서가 정상입니다."
+		message = msg_formattedTime + " " + checkEmptyPlace + room + " " + sensor_type + " 센서가 정상입니다."
 	}
 	return message
 }
@@ -1141,19 +1168,19 @@ func subscribeHandler(client mqtt.Client, topic string) {
 }
 
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
+	broker_mutex.Lock()
 	var settop_serial string
 	mac := parts[3]
 	query := fmt.Sprintf(`
-					SELECT serial 
-					FROM settop 
-					WHERE mac1 = '%s' OR mac2 = '%s'
-				`,
+		SELECT serial 
+		FROM settop 
+		WHERE mac1 = '%s' OR mac2 = '%s'
+	`,
 		mac, mac)
 
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
 
 	defer rows.Close()
@@ -1161,7 +1188,6 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 		err := rows.Scan(&settop_serial)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		}
 	}
 
@@ -1176,17 +1202,19 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	set_topic := base_topic + "/data/settop_sn/" + mac
 	message := settop_serial
 	log.Println(settop_serial)
-	pub_token := client.Publish(set_topic, 1, false, message)
+	client.Publish(set_topic, 1, false, message)
 
-	go func() {
-		_ = pub_token.Wait()
-		if pub_token.Error() != nil {
-			log.Println(pub_token.Error())
-		}
-	}()
+	// go func() {
+	// 	_ = pub_token.Wait()
+	// 	if pub_token.Error() != nil {
+	// 		log.Println(pub_token.Error())
+	// 	}
+	// }()
+	broker_mutex.Unlock()
 }
 
 func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
+	broker_mutex.Lock()
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var settop_uuid string
@@ -1195,15 +1223,14 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	settopMac := parts[4]
 	sensorSerial := parts[5]
 	query := fmt.Sprintf(`
-						SELECT uuid 
-						FROM settop 
-						WHERE mac1 = '%s' OR mac2 = '%s'
-					`,
+		SELECT uuid 
+		FROM settop 
+		WHERE mac1 = '%s' OR mac2 = '%s'
+	`,
 		settopMac, settopMac)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
 
 	defer rows.Close()
@@ -1211,7 +1238,6 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 		err := rows.Scan(&settop_uuid)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		}
 	}
 	if settop_uuid == "" {
@@ -1220,28 +1246,28 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	}
 
 	query = fmt.Sprintf(`
-						INSERT INTO sensor
-							SET uuid = '%s', 
-								settop_uuid = '%s',
-								status = '%d',
-								serial = '%s',
-								ip_address = '%s',
-								location = '%s',
-								registered_time = '%s',
-								mac = '%s',
-								name = '%s',
-								type = '%s'
-								
-						ON DUPLICATE KEY UPDATE
-							settop_uuid = VALUES(settop_uuid),
-							status = VALUES(status),
-							ip_address = VALUES(ip_address),
-							location = VALUES(location),
-							registered_time = VALUES(registered_time),
-							mac = VALUES(mac),
-							type = VALUES(type)
-					`,
-		uuid.String(), settop_uuid, 0,
+		INSERT INTO sensor
+			SET uuid = '%s', 
+				settop_uuid = '%s',
+				status = '%s',
+				serial = '%s',
+				ip_address = '%s',
+				location = '%s',
+				registered_time = '%s',
+				mac = '%s',
+				name = '%s',
+				type = '%s'
+				
+		ON DUPLICATE KEY UPDATE
+			settop_uuid = VALUES(settop_uuid),
+			status = VALUES(status),
+			ip_address = VALUES(ip_address),
+			location = VALUES(location),
+			registered_time = VALUES(registered_time),
+			mac = VALUES(mac),
+			type = VALUES(type)
+	`,
+		uuid.String(), settop_uuid, "0",
 		sensorSerial, "", "",
 		formattedTime, settopMac, sensorSerial, payloadStr,
 	)
@@ -1258,32 +1284,35 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 
 	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
 	message := "info"
-	pub_token := client.Publish(set_topic, 1, false, message)
+	client.Publish(set_topic, 1, false, message)
 
-	go func() {
-		_ = pub_token.Wait()
-		if pub_token.Error() != nil {
-			log.Println(pub_token.Error())
-		}
-	}()
+	// go func() {
+	// 	_ = pub_token.Wait()
+	// 	if pub_token.Error() != nil {
+	// 		log.Println(pub_token.Error())
+	// 	}
+	// }()
+	broker_mutex.Unlock()
 }
 
 func handleDeregistSensor(client mqtt.Client, parts []string) {
+	broker_mutex.Lock()
 	sensorSerial := parts[5]
+	log.Println("handleDeregistSensor called: ", sensorSerial)
 	query := fmt.Sprintf(`
-					UPDATE sensor SET
-						status = '%d'
-					WHERE serial = '%s'
-					`,
-		3, sensorSerial)
+		UPDATE sensor SET
+			status = '%s'
+		WHERE serial = '%s'
+		`,
+		"3", sensorSerial)
 
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
-		// gRPC 오류를 생성하여 상태 코드 설정
 	}
 	mainListMapping = NewMainListResponseMapping()
 	serverLog("센서의 연결이 끊어졌습니다.", "web", sensorSerial)
+	broker_mutex.Unlock()
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1326,11 +1355,12 @@ func initThreshold9Data(sensor_uuid string) {
 }
 
 func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqtt.Message) {
+	broker_mutex.Lock()
 	basePath := "storage_data/"
-	log.Println("handleFrameData called")
 	processMqttMessage(msg, basePath)
 	var decodedData map[string]interface{}
 	err := json.Unmarshal(msg.Payload(), &decodedData)
+	broker_mutex.Unlock()
 	if err != nil {
 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
 		fmt.Println("JSON decoding error:", err)
@@ -1338,71 +1368,97 @@ func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqt
 	}
 }
 
-func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
-	isAlive, err := strconv.Atoi(payloadStr)
+var aliveSensorLastAliveTime = make(map[string]time.Time)
 
+func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
+	broker_mutex.Lock()
 	settop_serial := parts[3]
-	var settop_uuid string
+	mac := parts[4]
 	query := fmt.Sprintf(`
 		UPDATE settop SET
-			is_alive = '%d'
+			is_alive = '%s'
 		WHERE serial = '%s'
 		`,
-		isAlive, settop_serial)
+		payloadStr, settop_serial)
+	_, err := db.Exec(query)
+	if err != nil {
+		log.Println(err)
+	}
+	// log.Println("handleConnectionData called: ", settop_serial, ", ", payloadStr)
 
-	if isAlive == 0 {
-		query := fmt.Sprintf(`
-				SELECT uuid 
-				FROM settop 
-				WHERE serial = '%s'
-			`,
-			settop_serial)
-
-		rows, err := db.Query(query)
+	if payloadStr == "0" {
+		query = fmt.Sprintf(`
+				UPDATE sensor SET
+					status = '%s'
+				WHERE mac = '%s'
+				`,
+			"3", mac)
+		_, err = db.Exec(query)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		}
+	} else {
+		aliveSensorLastAliveTime[mac] = time.Now()
 
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&settop_uuid)
-			if err != nil {
-				log.Println(err)
-				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-			}
-			query = fmt.Sprintf(`
-			UPDATE sensor SET
-				status = '%d'
-			WHERE settop_uuid = '%s'
-			`,
-				3, settop_uuid)
-			_, err = db.Exec(query)
-			if err != nil {
-				log.Println(err)
-			}
-		}
+		// query = fmt.Sprintf(`
+		// 		UPDATE sensor SET
+		// 			status = '%s'
+		// 		WHERE mac = '%s'
+		// 		`,
+		// 	"0", mac)
+		// _, err = db.Exec(query)
+		// if err != nil {
+		// 	log.Println(err)
+		// }
 	}
-
+	go checkAndUpdateDeadSensors()
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
+
 	mainListMapping = NewMainListResponseMapping()
+	broker_mutex.Unlock()
+}
+
+func checkAndUpdateDeadSensors() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	currentTime := time.Now()
+
+	for mac, lastAliveTime := range aliveSensorLastAliveTime {
+		// log.Println("1 = ", currentTime.Sub(lastAliveTime), ", 2 = ", 10*time.Second)
+		if currentTime.Sub(lastAliveTime) > 1*time.Minute {
+			// The last alive time is more than 1 minute ago, update the database
+			query := fmt.Sprintf(`
+                UPDATE sensor SET
+                    status = '%s'
+                WHERE mac = '%s'
+            `, "3", mac)
+
+			_, err := db.Exec(query)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
 }
 
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
+	broker_mutex.Lock()
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var uuid = uuid.New()
 	var sensor_type sql.NullString
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
+	mac := parts[4]
 	query := fmt.Sprintf(`
-			SELECT type 
-			FROM sensor 
-			WHERE serial = '%s'
-		`,
+		SELECT type 
+		FROM sensor 
+		WHERE serial = '%s'
+	`,
 		sensor_serial)
 
 	rows, err := db.Query(query)
@@ -1421,15 +1477,75 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 	j_frame := map[string]interface{}{}
 	err = json.Unmarshal(msg.Payload(), &j_frame)
 	var status string
-	if err != nil {
-		log.Println(err)
-		log.Println("status json err")
+	if err != nil { //sensor publish <<=
 		status = string(msg.Payload())
+		if status == "inspection" {
+			log.Println("inspection called")
+			var settop_uuid string
+			var group_uuid string
+
+			if mGroupUUIDs[sensor_serial] == nil {
+				query := fmt.Sprintf(`
+					SELECT uuid 
+					FROM settop 
+					WHERE serial = '%s'
+				`, settop_serial)
+
+				rows1, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows1.Close()
+				for rows1.Next() {
+					err := rows1.Scan(&settop_uuid)
+					if err != nil {
+						log.Println(err)
+					}
+
+					query2 := fmt.Sprintf(`
+						SELECT group_uuid 
+						FROM group_gateway 
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
+
+					rows2, err := db.Query(query2)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows2.Close()
+
+					for rows2.Next() {
+						err := rows2.Scan(&group_uuid)
+						if err != nil {
+							log.Println(err)
+						}
+						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+					}
+				}
+			}
+			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+			log.Println("444444")
+			j_frame := map[string]interface{}{
+				"status":     "inspection",
+				"group_uuid": mGroupUUIDs[sensor_serial],
+			}
+			frameJSON, _ := json.Marshal(j_frame)
+			client.Publish(set_topic, 1, false, frameJSON)
+
+			// go func() {
+
+			// 	_ = pub_token.Wait()
+			// 	if pub_token.Error() != nil {
+			// 		log.Println(pub_token.Error())
+			// 	}
+
+			// }()
+		}
 	} else {
 		status, _ = j_frame["status"].(string)
 	}
 
-	var result = 0
+	var result = -1
 	if string(status) == "normal" {
 		result = 0
 	} else if string(status) == "warning" {
@@ -1439,79 +1555,104 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 	} else if string(status) == "inspection" {
 		result = 3
 	}
-	message := eventMessage(settop_serial, getNullStringValidValue(sensor_type), result, sensor_serial)
-	var settop_uuid string
-	var group_uuid string
-	query = fmt.Sprintf(`
-		SELECT uuid 
-		FROM settop 
-		WHERE serial = '%s'
-	`, settop_serial)
+	if result >= 0 {
+		message := eventMessage(settop_serial, getNullStringValidValue(sensor_type), result, sensor_serial)
+		var settop_uuid string
+		var group_uuid string
+		query = fmt.Sprintf(`
+			SELECT uuid 
+			FROM settop 
+			WHERE serial = '%s'
+		`, settop_serial)
 
-	rows1, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows1.Close()
-	for rows1.Next() {
-		err := rows1.Scan(&settop_uuid)
+		rows1, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 		}
-
-		query2 := fmt.Sprintf(`
-				SELECT group_uuid 
-				FROM group_gateway 
-				WHERE settop_uuid = '%s'
-			`, settop_uuid)
-
-		rows2, err := db.Query(query2)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows2.Close()
-
-		for rows2.Next() {
-			err := rows2.Scan(&group_uuid)
+		defer rows1.Close()
+		for rows1.Next() {
+			err := rows1.Scan(&settop_uuid)
 			if err != nil {
 				log.Println(err)
 			}
-			SendMessageHandler("Trusafer", message, "style", group_uuid)
+
+			query2 := fmt.Sprintf(`
+					SELECT group_uuid 
+					FROM group_gateway 
+					WHERE settop_uuid = '%s'
+				`, settop_uuid)
+
+			rows2, err := db.Query(query2)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows2.Close()
+
+			for rows2.Next() {
+				err := rows2.Scan(&group_uuid)
+				if err != nil {
+					log.Println(err)
+				}
+				SendMessageHandler("Trusafer", message, "style", group_uuid)
+			}
 		}
+		var group_master_uuid string
+		query := fmt.Sprintf(`
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'master'
+		`)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_master_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+		SendMessageHandler("Trusafer", message, "style", group_master_uuid)
+
+		query = fmt.Sprintf(`
+			INSERT INTO log SET
+				uuid = '%s', 
+				unit = '%s',
+				message = '%s',
+				sensor_serial = '%s',
+				registered_time = '%s'
+			`,
+			uuid.String(), "mobile", message, sensor_serial, formattedTime)
+
+		sqlAddRegisterer, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		defer sqlAddRegisterer.Close()
+
+		sensorSerial := parts[5]
+		query = fmt.Sprintf(`
+			UPDATE sensor SET
+				status = '%s'
+			WHERE serial = '%s'
+			`,
+			strconv.Itoa(result), sensorSerial)
+
+		_, err = db.Exec(query)
+		if err != nil {
+			log.Println(err)
+		}
+		mainListMapping = NewMainListResponseMapping()
+
 	}
+	broker_mutex.Unlock()
 
-	query = fmt.Sprintf(`
-		INSERT INTO log SET
-			uuid = '%s', 
-			unit = '%s',
-			message = '%s',
-			sensor_serial = '%s',
-			registered_time = '%s'
-		`,
-		uuid.String(), "mobile", message, sensor_serial, formattedTime)
-
-	sqlAddRegisterer, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer sqlAddRegisterer.Close()
-
-	sensorSerial := parts[5]
-	query = fmt.Sprintf(`
-		UPDATE sensor SET
-			status = '%d'
-		WHERE serial = '%s'
-		`,
-		result, sensorSerial)
-
-	_, err = db.Exec(query)
-	if err != nil {
-		log.Println(err)
-	}
-	mainListMapping = NewMainListResponseMapping()
 }
 
 func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
+	broker_mutex.Lock()
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
@@ -1533,6 +1674,7 @@ func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg m
 		log.Println(err)
 	}
 	mainListMapping = NewMainListResponseMapping()
+	broker_mutex.Unlock()
 }
 
 func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, error) {
@@ -1550,7 +1692,6 @@ func createImageFromData(data []byte, width, height, startRow int) ([9]float64, 
 		for x := 0; x < width; x++ {
 			index := ((startRow+y)*width + x) * 2
 			pixelData := data[index : index+2]
-
 			rawValue := binary.BigEndian.Uint16(pixelData)
 			temp := ((float64(rawValue)-2047)/10. + 30) + TEMP_MIN
 

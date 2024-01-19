@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	firebase.google.com/go/v4 v4.13.0
-	github.com/ParkByeongKeun/trusafer-idl v0.0.0-20240110102353-2c5706af316f
+	github.com/ParkByeongKeun/trusafer-idl v0.0.0-20240119035639-0db855fce605
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/eclipse/paho.mqtt.golang v1.4.3
 	github.com/go-sql-driver/mysql v1.7.1
@@ -63,9 +63,9 @@ require (
 	golang.org/x/time v0.5.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/appengine/v2 v2.0.2 // indirect
-	google.golang.org/genproto v0.0.0-20240108191215-35c7eff3a6b1 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240108191215-35c7eff3a6b1 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240108191215-35c7eff3a6b1 // indirect
+	google.golang.org/genproto v0.0.0-20240116215550-a9fa1716bcac // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240116215550-a9fa1716bcac // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240116215550-a9fa1716bcac // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

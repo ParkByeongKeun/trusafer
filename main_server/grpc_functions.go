@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -357,24 +358,24 @@ func (s *server) UpdateRegisterer(ctx context.Context, in *pb.UpdateRegistererRe
 		in.Registerer.GetCompanyNumber(), in.Registerer.GetStatus(), boolToInt(in.Registerer.GetIsAlarm()),
 		in.Registerer.GetPermissionUuid(), in.Registerer.GetName(), in.Registerer.GetUuid())
 
-	sqlUpdateRegisterer, err := db.Exec(query)
+	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		return nil, err
 	}
-	affectedCount, err := sqlUpdateRegisterer.RowsAffected()
-	if err != nil {
-		log.Println("affected count error after update query: ", err)
-		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-		return nil, err
-	}
-	log.Println("update users complete: ", affectedCount)
-	if affectedCount == 0 {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
-	}
+	// affectedCount, err := sqlUpdateRegisterer.RowsAffected()
+	// if err != nil {
+	// 	log.Println("affected count error after update query: ", err)
+	// 	err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+	// 	return nil, err
+	// }
+	// log.Println("update users complete: ", affectedCount)
+	// if affectedCount == 0 {
+	// 	log.Println(err)
+	// 	err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	// 	return nil, err
+	// }
 	return &pb.UpdateRegistererResponse{}, nil
 }
 
@@ -2214,6 +2215,9 @@ func (s *server) ReadGroupList(ctx context.Context, in *pb.ReadGroupListRequest)
 			return nil, err
 		}
 
+		if name == "master" {
+			continue
+		}
 		groupList := &pb.Group{}
 		groupList.Uuid = uuid
 		groupList.Name = name
@@ -2593,7 +2597,7 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid date format: %v", err)
 	}
-	folderPath := filepath.Join("/appserver/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
+	folderPath := filepath.Join("/trusafer/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
 	// folderPath := filepath.Join("/Users/bkpark/works/go/trusafer/main_server/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
 	fileName := requestTime.Format("15:04:05") + ".raw"
 	filePath := filepath.Join(folderPath, fileName)
@@ -2654,7 +2658,33 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 	requestData := make(map[string]string)
 	requestData["token"] = in.GetToken()
 	tokens := []string{requestData["token"]}
-	topics := in.GetGroupUuid()
+	var topics []string
+
+	var group_master_uuid string
+	if claims.Admin {
+		query := fmt.Sprintf(`
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'master'
+		`)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_master_uuid)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+		}
+		topics = append(topics, group_master_uuid)
+	} else {
+		topics = in.GetGroupUuid()
+	}
 
 	for _, topic := range topics {
 		err = firebaseutil.SubscribeToTopic(tokens, topic, in.GetIsSubscribe())
@@ -2688,13 +2718,22 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 	query := ""
 
 	if in.GetUnit() == "mobile" {
+		sensorSerials := in.GetMobileBulkSensorSerial()
+		var sensorSerialClauses []string
+
+		for _, sensorSerial := range sensorSerials {
+			sensorSerialClauses = append(sensorSerialClauses, fmt.Sprintf("'%s'", sensorSerial))
+		}
+
+		sensorSerialsCondition := strings.Join(sensorSerialClauses, ",")
+
 		query = fmt.Sprintf(`
 		SELECT uuid, unit, message, registered_time 
 		FROM log 
-		WHERE unit = '%s' 
+		WHERE unit = '%s' AND sensor_serial IN (%s) 
 		ORDER by id desc 
 		LIMIT %d, %d 
-	`, in.GetUnit(), in.GetCursor(), in.GetCount())
+	`, in.GetUnit(), sensorSerialsCondition, in.GetCursor(), in.GetCount())
 	} else {
 		query = fmt.Sprintf(`
 		SELECT uuid, unit, message, registered_time 
@@ -3217,7 +3256,9 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 			log.Println(err)
 			return nil, err
 		}
-
+		if group_name == "master" {
+			continue
+		}
 		query = fmt.Sprintf(`
 			SELECT registerer_uuid 
 			FROM group_gateway 
@@ -3288,101 +3329,242 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 	}
 	var settop_uuid string
 	var group_uuid sql.NullString
-
+	var group_settop_uuid sql.NullString
 	var uuid_ string
 	var name string
 
 	var place_uuid string
 	var serial string
 	var address string
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+	}
+	if md["authorization"] == nil {
+		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
+	}
+	authHeaders, ok := md["authorization"]
+	if !ok || len(authHeaders) == 0 {
+		return nil, status.Errorf(codes.Unauthenticated, "Authentication token not provided")
+	}
+	token := authHeaders[0]
+	claims := &Claims{}
 
-	query := fmt.Sprintf(`
+	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(string(Conf.Jwt.SecretKeyAT)), nil
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
+	}
+
+	if claims.Admin {
+		query := fmt.Sprintf(`
 		SELECT uuid, place_uuid, serial
 		FROM settop 
 		`)
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&settop_uuid, &place_uuid, &serial)
-		if err != nil {
-			log.Println(err)
-			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-			return nil, err
-		}
-
-		query = fmt.Sprintf(`
-		SELECT address 
-		FROM place 
-		WHERE uuid = '%s'
-		`,
-			place_uuid)
-		rows1, err := db.Query(query)
+		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
 		}
-		defer rows1.Close()
-		for rows1.Next() {
-			err := rows1.Scan(&address)
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&settop_uuid, &place_uuid, &serial)
 			if err != nil {
 				log.Println(err)
 				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 				return nil, err
 			}
-		}
-		mainSettop := &pb.MainSettop{}
-		mainSettop.Serial = serial
-		mainSettop.Address = address
 
-		query = fmt.Sprintf(`
+			query = fmt.Sprintf(`
+		SELECT address 
+		FROM place 
+		WHERE uuid = '%s'
+		`,
+				place_uuid)
+			rows1, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+				return nil, err
+			}
+			defer rows1.Close()
+			for rows1.Next() {
+				err := rows1.Scan(&address)
+				if err != nil {
+					log.Println(err)
+					err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+					return nil, err
+				}
+			}
+			mainSettop := &pb.MainSettop{}
+			mainSettop.Serial = serial
+			mainSettop.Address = address
+
+			query = fmt.Sprintf(`
 			SELECT group_uuid 
 			FROM group_gateway 
 			WHERE settop_uuid = '%s'
 		`, settop_uuid)
 
-		rows2, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-			return nil, err
-		}
-		defer rows2.Close()
-
-		for rows2.Next() {
-			err := rows2.Scan(&group_uuid)
+			rows2, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
 				return nil, err
 			}
-			query = fmt.Sprintf(`
+			defer rows2.Close()
+
+			for rows2.Next() {
+				err := rows2.Scan(&group_uuid)
+				if err != nil {
+					log.Println(err)
+					return nil, err
+				}
+				query = fmt.Sprintf(`
 				SELECT uuid, name  
 				FROM group_ 
 				WHERE uuid = '%s'
 				`,
-				getNullStringValidValue(group_uuid))
-			registerer_rows, err := db.Query(query)
-			if err != nil {
-				log.Println(err)
-				return nil, status.Errorf(codes.Internal, "Failed to fetch settop information: %v", err)
-			}
-			groupList := &pb.Group{}
-			for registerer_rows.Next() {
-				err := registerer_rows.Scan(&uuid_, &name)
+					getNullStringValidValue(group_uuid))
+				registerer_rows, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
-					return nil, status.Errorf(codes.Internal, "Failed to scan permission rows: %v", err)
+					return nil, status.Errorf(codes.Internal, "Failed to fetch settop information: %v", err)
 				}
-				groupList.Uuid = uuid_
-				groupList.Name = name
+				groupList := &pb.Group{}
+				for registerer_rows.Next() {
+					err := registerer_rows.Scan(&uuid_, &name)
+					if err != nil {
+						log.Println(err)
+						return nil, status.Errorf(codes.Internal, "Failed to scan permission rows: %v", err)
+					}
+					groupList.Uuid = uuid_
+					groupList.Name = name
+				}
+				mainSettop.GroupList = append(mainSettop.GroupList, groupList)
 			}
-			mainSettop.GroupList = append(mainSettop.GroupList, groupList)
+			response.Settops[settop_uuid] = mainSettop
 		}
-		response.Settops[settop_uuid] = mainSettop
+	} else {
+		readRegistererResponse, _ := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
+			Name: "check",
+		})
+
+		for _, group_uuid_ := range readRegistererResponse.GetRegistererInfo().GetGroupUuid() {
+			query := fmt.Sprintf(`
+			SELECT settop_uuid  
+			FROM group_gateway 
+			WHERE group_uuid = '%s'
+			`, group_uuid_)
+
+			rows, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+				return nil, err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&group_settop_uuid)
+				if err != nil {
+					log.Println(err)
+					err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+					return nil, err
+				}
+
+				query := fmt.Sprintf(`
+			SELECT uuid, place_uuid, serial
+			FROM settop 
+			WHERE uuid = '%s' 
+			`, getNullStringValidValue(group_settop_uuid))
+				rows, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+					err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+					return nil, err
+				}
+				defer rows.Close()
+				for rows.Next() {
+					err := rows.Scan(&settop_uuid, &place_uuid, &serial)
+					if err != nil {
+						log.Println(err)
+						err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+						return nil, err
+					}
+
+					query = fmt.Sprintf(`
+			SELECT address 
+			FROM place 
+			WHERE uuid = '%s'
+			`,
+						place_uuid)
+					rows1, err := db.Query(query)
+					if err != nil {
+						log.Println(err)
+						err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+						return nil, err
+					}
+					defer rows1.Close()
+					for rows1.Next() {
+						err := rows1.Scan(&address)
+						if err != nil {
+							log.Println(err)
+							err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+							return nil, err
+						}
+					}
+					mainSettop := &pb.MainSettop{}
+					mainSettop.Serial = serial
+					mainSettop.Address = address
+
+					query = fmt.Sprintf(`
+				SELECT group_uuid 
+				FROM group_gateway 
+				WHERE settop_uuid = '%s'
+			`, settop_uuid)
+
+					rows2, err := db.Query(query)
+					if err != nil {
+						log.Println(err)
+						return nil, err
+					}
+					defer rows2.Close()
+
+					for rows2.Next() {
+						err := rows2.Scan(&group_uuid)
+						if err != nil {
+							log.Println(err)
+							return nil, err
+						}
+						query = fmt.Sprintf(`
+					SELECT uuid, name  
+					FROM group_ 
+					WHERE uuid = '%s'
+					`,
+							getNullStringValidValue(group_uuid))
+						registerer_rows, err := db.Query(query)
+						if err != nil {
+							log.Println(err)
+							return nil, status.Errorf(codes.Internal, "Failed to fetch settop information: %v", err)
+						}
+						groupList := &pb.Group{}
+						for registerer_rows.Next() {
+							err := registerer_rows.Scan(&uuid_, &name)
+							if err != nil {
+								log.Println(err)
+								return nil, status.Errorf(codes.Internal, "Failed to scan permission rows: %v", err)
+							}
+							groupList.Uuid = uuid_
+							groupList.Name = name
+						}
+						mainSettop.GroupList = append(mainSettop.GroupList, groupList)
+					}
+					response.Settops[settop_uuid] = mainSettop
+				}
+			}
+		}
+
 	}
 
 	return response, nil
