@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,6 +110,38 @@ var (
 	tokenList       []string
 )
 
+// sensor history data
+type HistoryData struct {
+	SensorSerial  string
+	MinValue      float64
+	MaxValue      float64
+	FormattedTime string
+}
+
+type SensorQueue struct {
+	queue []HistoryData
+	mu    sync.Mutex
+}
+
+func (q *SensorQueue) Enqueue(data HistoryData) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.queue = append(q.queue, data)
+
+}
+
+func (q *SensorQueue) DequeueAll() []HistoryData {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	dataCopy := make([]HistoryData, len(q.queue))
+	copy(dataCopy, q.queue)
+	q.queue = nil
+	return dataCopy
+}
+
+var queue = SensorQueue{}
+
 func accessibleRolesForAT() map[string][]string {
 	return map[string][]string{
 		"admin": {"read", "write", "delete"},
@@ -192,6 +225,7 @@ func main() {
 	opts1.SetClientID(mqtt_serial).SetTLSConfig(tlsconfig)
 	opts1.SetUsername(username)
 	opts1.SetPassword(password)
+	opts1.SetCleanSession(true)
 	opts1.SetConnectionLostHandler(func(c mqtt.Client, err error) {
 		println("mqtt connection lost error: " + err.Error())
 	})
@@ -306,10 +340,9 @@ func main() {
 
 	go func() {
 		for {
-			log.Println("gget/connection called")
 			time.Sleep(30 * time.Second)
 
-			broker_mutex.Lock()
+			// broker_mutex.Lock()
 			set_topic := base_topic + "/gget/connection"
 			client.Publish(set_topic, 1, false, "")
 
@@ -319,7 +352,36 @@ func main() {
 			// 		log.Println(pub_token.Error())
 			// 	}
 			// }()
-			broker_mutex.Unlock()
+			// broker_mutex.Unlock()
+		}
+	}()
+
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+
+			data := queue.DequeueAll()
+			if len(data) > 0 {
+				uniqueEntries := make(map[string]HistoryData)
+
+				// Iterate through the data and add unique entries to the map
+				for _, entry := range data {
+					key := entry.SensorSerial + entry.FormattedTime
+					uniqueEntries[key] = entry
+				}
+
+				// Convert the unique entries back to a slice
+				uniqueData := make([]HistoryData, 0, len(uniqueEntries))
+				for _, value := range uniqueEntries {
+					uniqueData = append(uniqueData, value)
+				}
+
+				// Insert unique data to the database
+				err := insertBatch(db, uniqueData)
+				if err != nil {
+					fmt.Println("Error:", err)
+				}
+			}
 		}
 	}()
 
@@ -513,6 +575,8 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 
 func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	temp_min_array, temp_max_array, err := createImageFromData(data, 60, 50, 0)
@@ -749,7 +813,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 	var minValue, maxValue float64
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
-	var uuid = uuid.New()
 
 	for i, value := range temp_max_array {
 		if i == 0 {
@@ -766,24 +829,96 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 			minValue = math.Min(minValue, value)
 		}
 	}
-	query := fmt.Sprintf(`
-		INSERT INTO history SET
-			uuid = '%s', 
-			sensor_serial = '%s',
-			min_temp = '%f',
-			max_temp = '%f',
-			date = '%s'
-		`,
-		uuid.String(), sensor_serial, minValue, maxValue, formattedTime)
 
-	sqlAddRegisterer, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
+	historyData := HistoryData{
+		SensorSerial:  sensor_serial,
+		MinValue:      minValue,
+		MaxValue:      maxValue,
+		FormattedTime: formattedTime,
 	}
-	defer sqlAddRegisterer.Close()
-	broker_mutex.Unlock()
+	queue.Enqueue(historyData)
+
+	// query := fmt.Sprintf(`
+	// 	INSERT INTO %s SET
+	// 		min_temp = '%f',
+	// 		max_temp = '%f',
+	// 		date = '%s'
+	// 	`,
+	// 	sensor_serial, minValue, maxValue, formattedTime)
+
+	// sqlAddRegisterer, err := db.Query(query)
+	// if err != nil {
+	// 	log.Println(err)
+	// }
+	// defer sqlAddRegisterer.Close()
+	// broker_mutex.Unlock()
 
 	return nil
+}
+
+func insertBatch(db *sql.DB, data []HistoryData) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	sortDataByTime(data)
+
+	for _, sensorData := range data {
+		query := fmt.Sprintf(`
+			INSERT INTO %s (min_temp, max_temp, date)
+			VALUES (?, ?, ?)
+		`, sensorData.SensorSerial)
+
+		stmt, err := tx.Prepare(query)
+		if err != nil {
+			return err
+		}
+
+		_, err = stmt.Exec(sensorData.MinValue, sensorData.MaxValue, sensorData.FormattedTime)
+		stmt.Close()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func sortDataByTime(data []HistoryData) {
+	// time.Time 형태로 변환
+	timeData := make([]struct {
+		time.Time
+		Index int
+	}, len(data))
+
+	for i, d := range data {
+		parsedTime, _ := time.Parse("2006-01-02 15:04:05", d.FormattedTime)
+		timeData[i] = struct {
+			time.Time
+			Index int
+		}{parsedTime, i}
+	}
+
+	// 정렬
+	sort.Slice(timeData, func(i, j int) bool {
+		return timeData[i].Time.Before(timeData[j].Time)
+	})
+
+	// 정렬된 순서로 데이터 갱신
+	sortedData := make([]HistoryData, len(data))
+	for i, td := range timeData {
+		sortedData[i] = data[td.Index]
+	}
+
+	// 원본 데이터 갱신
+	copy(data, sortedData)
 }
 
 func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
@@ -942,8 +1077,6 @@ func deleteOldImages(basePath string) {
 		case <-ticker.C:
 			// history 삭제 (7주일 보관)==
 			deleteOldDataWithTransaction(db)
-
-			// basePath 아래의 모든 폴더 검색
 			folders, err := getFolders(basePath)
 			if err != nil {
 				log.Println("Error getting folders:", err)
@@ -1032,7 +1165,8 @@ func deleteOldImagesInFolder(folderPath string) {
 }
 
 func SendMessageHandler(title string, body string, style string, topic string) {
-	firebaseutil.SendMessage(title, body, style, topic)
+	firebaseutil.SendMessageAsync(title, body, style, topic)
+
 }
 
 func eventMessage(settop_serial string, sensor_type string, level_temp int, sensor_serial string) string {
@@ -1132,7 +1266,7 @@ func serverLog(message string, unit string, sensor_serial string) {
 func subscribeHandler(client mqtt.Client, topic string) {
 	mu.Lock()
 	defer mu.Unlock()
-	if token := client.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
+	if token := client.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
 		payloadStr := string(msg.Payload())
 		parts := strings.Split(msg.Topic(), "/")
 		logger.Title.Printf(topic)
@@ -1169,6 +1303,8 @@ func subscribeHandler(client mqtt.Client, topic string) {
 
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	var settop_serial string
 	mac := parts[3]
 	query := fmt.Sprintf(`
@@ -1210,11 +1346,35 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	// 		log.Println(pub_token.Error())
 	// 	}
 	// }()
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
+}
+
+func createSensorDataTable(db *sql.DB, tableName string) error {
+
+	query := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
+			id int(11) NOT NULL AUTO_INCREMENT,
+			min_temp FLOAT NOT NULL,
+			max_temp FLOAT NOT NULL,
+			date datetime NOT NULL,
+			PRIMARY KEY (id),
+			KEY fk_history_trusafer (id)
+			) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	`, tableName)
+
+	_, err := db.Exec(query)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s 테이블이 성공적으로 생성되었습니다.\n", tableName)
+	return nil
 }
 
 func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var settop_uuid string
@@ -1222,6 +1382,7 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	settop_serial := parts[3]
 	settopMac := parts[4]
 	sensorSerial := parts[5]
+	createSensorDataTable(db, sensorSerial)
 	query := fmt.Sprintf(`
 		SELECT uuid 
 		FROM settop 
@@ -1292,11 +1453,13 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	// 		log.Println(pub_token.Error())
 	// 	}
 	// }()
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 }
 
 func handleDeregistSensor(client mqtt.Client, parts []string) {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	sensorSerial := parts[5]
 	log.Println("handleDeregistSensor called: ", sensorSerial)
 	query := fmt.Sprintf(`
@@ -1312,7 +1475,7 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 	}
 	mainListMapping = NewMainListResponseMapping()
 	serverLog("센서의 연결이 끊어졌습니다.", "web", sensorSerial)
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1356,11 +1519,13 @@ func initThreshold9Data(sensor_uuid string) {
 
 func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqtt.Message) {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	basePath := "storage_data/"
 	processMqttMessage(msg, basePath)
 	var decodedData map[string]interface{}
 	err := json.Unmarshal(msg.Payload(), &decodedData)
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 	if err != nil {
 		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
 		fmt.Println("JSON decoding error:", err)
@@ -1368,10 +1533,10 @@ func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqt
 	}
 }
 
-var aliveSensorLastAliveTime = make(map[string]time.Time)
+// var aliveSensorLastAliveTime = make(map[string]time.Time)
 
 func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
-	broker_mutex.Lock()
+
 	settop_serial := parts[3]
 	mac := parts[4]
 	query := fmt.Sprintf(`
@@ -1386,7 +1551,21 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	}
 	// log.Println("handleConnectionData called: ", settop_serial, ", ", payloadStr)
 
+	// query = fmt.Sprintf(`
+	// 			UPDATE sensor SET
+	// 				status = '%s'
+	// 			`,
+	// 	"0")
+	// _, err = db.Exec(query)
+	// if err != nil {
+	// 	log.Println(err)
+	// }
+
 	if payloadStr == "0" {
+		broker_mutex.Lock()
+		defer broker_mutex.Unlock()
+		log.Println("e1: ", mac)
+
 		query = fmt.Sprintf(`
 				UPDATE sensor SET
 					status = '%s'
@@ -1397,56 +1576,49 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 		if err != nil {
 			log.Println(err)
 		}
-	} else {
-		aliveSensorLastAliveTime[mac] = time.Now()
-
-		// query = fmt.Sprintf(`
-		// 		UPDATE sensor SET
-		// 			status = '%s'
-		// 		WHERE mac = '%s'
-		// 		`,
-		// 	"0", mac)
-		// _, err = db.Exec(query)
-		// if err != nil {
-		// 	log.Println(err)
-		// }
 	}
-	go checkAndUpdateDeadSensors()
+	// else {
+	// 	aliveSensorLastAliveTime[mac] = time.Now()
+	// }
+	// go checkAndUpdateDeadSensors()
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
 
 	mainListMapping = NewMainListResponseMapping()
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 }
 
-func checkAndUpdateDeadSensors() {
-	mu.Lock()
-	defer mu.Unlock()
+// func checkAndUpdateDeadSensors() {
+// 	mu.Lock()
+// 	defer mu.Unlock()
 
-	currentTime := time.Now()
+// 	currentTime := time.Now()
 
-	for mac, lastAliveTime := range aliveSensorLastAliveTime {
-		// log.Println("1 = ", currentTime.Sub(lastAliveTime), ", 2 = ", 10*time.Second)
-		if currentTime.Sub(lastAliveTime) > 1*time.Minute {
-			// The last alive time is more than 1 minute ago, update the database
-			query := fmt.Sprintf(`
-                UPDATE sensor SET
-                    status = '%s'
-                WHERE mac = '%s'
-            `, "3", mac)
+// 	for mac, lastAliveTime := range aliveSensorLastAliveTime {
+// 		// log.Println("1 = ", currentTime.Sub(lastAliveTime), ", 2 = ", 10*time.Second)
+// 		if currentTime.Sub(lastAliveTime) > 1*time.Minute {
+// 			delete(aliveSensorLastAliveTime, mac)
+// 			// The last alive time is more than 1 minute ago, update the database
+// 			query := fmt.Sprintf(`
+//                 UPDATE sensor SET
+//                     status = '%s'
+//                 WHERE mac = '%s'
+//             `, "3", mac)
 
-			_, err := db.Exec(query)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-	}
-}
+// 			_, err := db.Exec(query)
+// 			if err != nil {
+// 				log.Println(err)
+// 			}
+// 		}
+// 	}
+// }
 
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
-	broker_mutex.Lock()
+	// mu.Lock()
+	// defer mu.Unlock()
+
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var uuid = uuid.New()
@@ -1524,7 +1696,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				}
 			}
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-			log.Println("444444")
 			j_frame := map[string]interface{}{
 				"status":     "inspection",
 				"group_uuid": mGroupUUIDs[sensor_serial],
@@ -1647,12 +1818,14 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 		mainListMapping = NewMainListResponseMapping()
 
 	}
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 
 }
 
 func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
 	broker_mutex.Lock()
+	defer broker_mutex.Unlock()
+
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
@@ -1674,7 +1847,7 @@ func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg m
 		log.Println(err)
 	}
 	mainListMapping = NewMainListResponseMapping()
-	broker_mutex.Unlock()
+	// broker_mutex.Unlock()
 }
 
 func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, error) {

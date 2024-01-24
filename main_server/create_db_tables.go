@@ -30,26 +30,24 @@ func createDBTablesIfNotExist() error {
 	log.Println(" - place table OK")
 	defer sqlCreatetrusafer.Close()
 
-	// create history
-	query = fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS history (
-			id int(11) NOT NULL AUTO_INCREMENT,
-			uuid VARCHAR(36) NOT NULL,
-			sensor_serial VARCHAR(36) DEFAULT NULL,
-			min_temp FLOAT NOT NULL,
-			max_temp FLOAT NOT NULL,
-			date datetime NOT NULL,
-			PRIMARY KEY (id),
-			KEY fk_history_trusafer (id)
-		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
-	`)
-	sqlCreateHistory, err := db.Query(query)
-	if err != nil {
-		log.Printf(" - create history err: %s", err)
-		return err
-	}
-	log.Println(" - History table OK")
-	defer sqlCreateHistory.Close()
+	// // create history
+	// query = fmt.Sprintf(`
+	// 	CREATE TABLE IF NOT EXISTS history (
+	// 		id int(11) NOT NULL AUTO_INCREMENT,
+	// 		min_temp FLOAT NOT NULL,
+	// 		max_temp FLOAT NOT NULL,
+	// 		date datetime NOT NULL,
+	// 		PRIMARY KEY (id),
+	// 		KEY fk_history_trusafer (id)
+	// 	) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+	// `)
+	// sqlCreateHistory, err := db.Query(query)
+	// if err != nil {
+	// 	log.Printf(" - create history err: %s", err)
+	// 	return err
+	// }
+	// log.Println(" - History table OK")
+	// defer sqlCreateHistory.Close()
 
 	// create registerer
 	query = fmt.Sprintf(`

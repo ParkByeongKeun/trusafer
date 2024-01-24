@@ -1821,108 +1821,106 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 	return response, nil
 }
 
-func (s *server) CreateHistory(ctx context.Context, in *pb.CreateHistoryRequest) (*pb.CreateHistoryResponse, error) {
-	log.Printf("Received AddHistory: %s, %s, %f, %f, %s",
-		in.History.GetUuid(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
-	var uuid = uuid.New()
+// func (s *server) CreateHistory(ctx context.Context, in *pb.CreateHistoryRequest) (*pb.CreateHistoryResponse, error) {
+// 	log.Printf("Received AddHistory: %s, %s, %f, %f, %s",
+// 		in.History.GetUuid(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
+// 	var uuid = uuid.New()
 
-	query := fmt.Sprintf(`
-		INSERT INTO history SET
-			uuid = '%s', 
-			sensor_serial = '%s',
-			min_temp = '%f',
-			max_temp = '%f',
-			date = '%s'
-		`,
-		uuid.String(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
+// 	query := fmt.Sprintf(`
+// 		INSERT INTO history SET
+// 			uuid = '%s',
+// 			sensor_serial = '%s',
+// 			min_temp = '%f',
+// 			max_temp = '%f',
+// 			date = '%s'
+// 		`,
+// 		uuid.String(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
 
-	sqlAddRegisterer, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
-	}
-	defer sqlAddRegisterer.Close()
+// 	sqlAddRegisterer, err := db.Query(query)
+// 	if err != nil {
+// 		log.Println(err)
+// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 		return nil, err
+// 	}
+// 	defer sqlAddRegisterer.Close()
 
-	return &pb.CreateHistoryResponse{}, nil
-}
+// 	return &pb.CreateHistoryResponse{}, nil
+// }
 
-func (s *server) DeleteHistory(ctx context.Context, in *pb.DeleteHistoryRequest) (*pb.DeleteHistoryResponse, error) {
-	log.Printf("Received DeleteHistory: %s", in.GetHistoryUuid())
+// func (s *server) DeleteHistory(ctx context.Context, in *pb.DeleteHistoryRequest) (*pb.DeleteHistoryResponse, error) {
+// 	log.Printf("Received DeleteHistory: %s", in.GetHistoryUuid())
 
-	query := fmt.Sprintf(`
-		DELETE FROM history
-		WHERE uuid = '%s'
-		`,
-		in.GetHistoryUuid())
+// 	query := fmt.Sprintf(`
+// 		DELETE FROM history
+// 		WHERE uuid = '%s'
+// 		`,
+// 		in.GetHistoryUuid())
 
-	sqlDeleteRegisterer, err := db.Exec(query)
-	if err != nil {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
-	}
-	nRow, err := sqlDeleteRegisterer.RowsAffected()
-	if err != nil {
-		log.Println(err)
-		return nil, err
-	}
-	fmt.Println("delete count : ", nRow)
-	return &pb.DeleteHistoryResponse{}, nil
-}
+// 	sqlDeleteRegisterer, err := db.Exec(query)
+// 	if err != nil {
+// 		log.Println(err)
+// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 		return nil, err
+// 	}
+// 	nRow, err := sqlDeleteRegisterer.RowsAffected()
+// 	if err != nil {
+// 		log.Println(err)
+// 		return nil, err
+// 	}
+// 	fmt.Println("delete count : ", nRow)
+// 	return &pb.DeleteHistoryResponse{}, nil
+// }
 
-func (s *server) ReadHistory(ctx context.Context, in *pb.ReadHistoryRequest) (*pb.ReadHistoryResponse, error) {
-	log.Printf("Received GetHistory: %s", in.GetHistoryUuid())
-	response := &pb.ReadHistoryResponse{}
+// func (s *server) ReadHistory(ctx context.Context, in *pb.ReadHistoryRequest) (*pb.ReadHistoryResponse, error) {
+// 	log.Printf("Received GetHistory: %s", in.GetHistoryUuid())
+// 	response := &pb.ReadHistoryResponse{}
 
-	var uuid string
-	var sensor_serial string
-	var min_temp float32
-	var max_temp float32
-	var date string
+// 	var uuid string
+// 	var sensor_serial string
+// 	var min_temp float32
+// 	var max_temp float32
+// 	var date string
 
-	query := fmt.Sprintf(`
-		SELECT uuid, sensor_serial, min_temp, max_temp, date  
-		FROM history 
-		WHERE uuid = '%s'
-		`,
-		in.GetHistoryUuid())
+// 	query := fmt.Sprintf(`
+// 		SELECT uuid, sensor_serial, min_temp, max_temp, date
+// 		FROM history
+// 		WHERE uuid = '%s'
+// 		`,
+// 		in.GetHistoryUuid())
 
-	rows, err := db.Query(query)
+// 	rows, err := db.Query(query)
 
-	if err != nil {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
+// 	if err != nil {
+// 		log.Println(err)
+// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+// 		return nil, err
+// 	}
+// 	defer rows.Close()
 
-	for rows.Next() {
-		err := rows.Scan(&uuid, &sensor_serial, &min_temp, &max_temp, &date)
-		if err != nil {
-			log.Println(err)
-			return nil, status.Errorf(codes.Internal, "Failed to scan history row: %v", err)
-		}
+// 	for rows.Next() {
+// 		err := rows.Scan(&uuid, &sensor_serial, &min_temp, &max_temp, &date)
+// 		if err != nil {
+// 			log.Println(err)
+// 			return nil, status.Errorf(codes.Internal, "Failed to scan history row: %v", err)
+// 		}
 
-		history := &pb.History{}
-		history.Uuid = uuid
-		history.SensorSerial = sensor_serial
-		history.MinTemp = min_temp
-		history.MaxTemp = max_temp
-		history.Date = date
+// 		history := &pb.History{}
+// 		history.Uuid = uuid
+// 		history.SensorSerial = sensor_serial
+// 		history.MinTemp = min_temp
+// 		history.MaxTemp = max_temp
+// 		history.Date = date
 
-		response.History = history
-	}
+// 		response.History = history
+// 	}
 
-	return response, nil
-}
+// 	return response, nil
+// }
 
 func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequest) (*pb.ReadHistoryListResponse, error) {
-	log.Printf("Received GetHistoryList: success")
+	log.Printf("Received GetHistoryList: called")
 	response := &pb.ReadHistoryListResponse{}
 
-	var uuid string
-	var sensor_serial string
 	var min_temp float32
 	var max_temp float32
 	var date string
@@ -1931,13 +1929,12 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 	trim_interval := 1
 	if in.GetInterval() < 10 {
 		query = fmt.Sprintf(`
-		SELECT uuid, sensor_serial, min_temp, max_temp, date  
-		FROM history 
-		where date >= '%s' AND date < '%s' AND
-		sensor_serial = '%s'
-		ORDER by id desc
+		SELECT min_temp, max_temp, date  
+		FROM %s 
+		where date >= '%s' AND date < '%s' 
+		ORDER by id desc 
 		LIMIT %d, %d
-	`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), in.GetCursor(), in.GetCount())
+	`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), in.GetCursor(), in.GetCount())
 	} else if in.GetInterval() >= 10 && in.GetInterval() < 300 {
 		if in.GetInterval() >= 10 && in.GetInterval() < 20 {
 			trim_interval = 10
@@ -1947,14 +1944,13 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 			trim_interval = 60
 		}
 		query = fmt.Sprintf(`
-		SELECT uuid, sensor_serial, min_temp, max_temp, date  
-		FROM history 
-		where date >= '%s' AND date < '%s' AND
-		sensor_serial = '%s'
+		SELECT min_temp, max_temp, date  
+		FROM %s 
+		where date >= '%s' AND date < '%s'
 		GROUP by DATE(date), HOUR(date), MINUTE(date), FLOOR(SECOND(date)/%d)
 		ORDER by id desc
 		LIMIT %d, %d
-	`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), trim_interval, in.GetCursor(), in.GetCount())
+	`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), trim_interval, in.GetCursor(), in.GetCount())
 	} else {
 		if in.GetInterval() >= (30*10) && in.GetInterval() < (60*20) {
 			trim_interval = 10
@@ -1964,14 +1960,13 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 			trim_interval = 60
 		}
 		query = fmt.Sprintf(`
-			SELECT uuid, sensor_serial, min_temp, max_temp, date  
-			FROM history 
-			where date >= '%s' AND date < '%s' AND
-			sensor_serial = '%s'
+			SELECT min_temp, max_temp, date  
+			FROM %s 
+			where date >= '%s' AND date < '%s'
 			GROUP by DATE(date), HOUR(date), FLOOR(MINUTE(date)/%d)
 			ORDER by id desc
 			LIMIT %d, %d
-		`, in.GetPrevDate(), in.GetNextDate(), in.GetSensorSerial(), trim_interval, in.GetCursor(), in.GetCount())
+		`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), trim_interval, in.GetCursor(), in.GetCount())
 	}
 
 	rows, err := db.Query(query)
@@ -1983,15 +1978,14 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 	}
 	defer rows.Close()
 	for rows.Next() {
-		err := rows.Scan(&uuid, &sensor_serial, &min_temp, &max_temp, &date)
+		err := rows.Scan(&min_temp, &max_temp, &date)
 		if err != nil {
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Failed to scan history list row: %v", err)
 		}
 
+		// log.Println("1 = ", min_temp, max_temp, date)
 		historyList := &pb.History{}
-		historyList.Uuid = uuid
-		historyList.SensorSerial = sensor_serial
 		historyList.MinTemp = min_temp
 		historyList.MaxTemp = max_temp
 		historyList.Date = date
