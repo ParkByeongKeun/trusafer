@@ -2683,7 +2683,7 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 	for _, topic := range topics {
 		err = firebaseutil.SubscribeToTopic(tokens, topic, in.GetIsSubscribe())
 		query := fmt.Sprintf(`
-		INSERT INTO firebase_token SET 
+		INSERT IGNORE INTO firebase_token SET 
 			token = '%s',
 			group_uuid = '%s',
 			email = '%s'

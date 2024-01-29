@@ -338,45 +338,39 @@ func main() {
 		Handler: cors(gwmux),
 	}
 
-	go func() {
-		for {
-			time.Sleep(30 * time.Second)
+	// go func() {
+	// 	for {
+	// 		time.Sleep(30 * time.Second)
 
-			// broker_mutex.Lock()
-			set_topic := base_topic + "/gget/connection"
-			client.Publish(set_topic, 1, false, "")
+	// 		// broker_mutex.Lock()
+	// 		set_topic := base_topic + "/gget/connection"
+	// 		client.Publish(set_topic, 1, false, "")
 
-			// go func() {
-			// 	_ = pub_token.Wait()
-			// 	if pub_token.Error() != nil {
-			// 		log.Println(pub_token.Error())
-			// 	}
-			// }()
-			// broker_mutex.Unlock()
-		}
-	}()
+	// 		// go func() {
+	// 		// 	_ = pub_token.Wait()
+	// 		// 	if pub_token.Error() != nil {
+	// 		// 		log.Println(pub_token.Error())
+	// 		// 	}
+	// 		// }()
+	// 		// broker_mutex.Unlock()
+	// 	}
+	// }()
 
-	go func() {
+	go func() { //큐에 넣어서 센서데이터 batch insert하기 5초에 1번
 		for {
 			time.Sleep(5 * time.Second)
 
 			data := queue.DequeueAll()
 			if len(data) > 0 {
 				uniqueEntries := make(map[string]HistoryData)
-
-				// Iterate through the data and add unique entries to the map
 				for _, entry := range data {
 					key := entry.SensorSerial + entry.FormattedTime
 					uniqueEntries[key] = entry
 				}
-
-				// Convert the unique entries back to a slice
 				uniqueData := make([]HistoryData, 0, len(uniqueEntries))
 				for _, value := range uniqueEntries {
 					uniqueData = append(uniqueData, value)
 				}
-
-				// Insert unique data to the database
 				err := insertBatch(db, uniqueData)
 				if err != nil {
 					fmt.Println("Error:", err)
@@ -617,51 +611,71 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 				var settop_uuid string
 				var group_uuid string
+				var sensor_uuid string
+				var sensor_name string
 
-				if mGroupUUIDs[sensor_serial] == nil {
-					query := fmt.Sprintf(`
+				query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
 
-					rows1, err := db.Query(query)
+				rows1, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows1.Close()
+				for rows1.Next() {
+					err := rows1.Scan(&settop_uuid)
 					if err != nil {
 						log.Println(err)
 					}
-					defer rows1.Close()
-					for rows1.Next() {
-						err := rows1.Scan(&settop_uuid)
-						if err != nil {
-							log.Println(err)
-						}
 
-						query2 := fmt.Sprintf(`
+					query2 := fmt.Sprintf(`
 							SELECT group_uuid 
 							FROM group_gateway 
 							WHERE settop_uuid = '%s'
 						`, settop_uuid)
 
-						rows2, err := db.Query(query2)
+					rows2, err := db.Query(query2)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows2.Close()
+
+					for rows2.Next() {
+						err := rows2.Scan(&group_uuid)
 						if err != nil {
 							log.Println(err)
 						}
-						defer rows2.Close()
-
-						for rows2.Next() {
-							err := rows2.Scan(&group_uuid)
-							if err != nil {
-								log.Println(err)
-							}
-							mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-						}
+						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 					}
 				}
+				query = fmt.Sprintf(`
+					SELECT uuid, name 
+					FROM sensor 
+					WHERE serial = '%s'
+				`, sensor_serial)
 
-				j_frame := map[string]interface{}{
-					"status":     mImageStatus[sensor_serial],
-					"group_uuid": mGroupUUIDs[sensor_serial],
+				rows, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
 				}
+				defer rows.Close()
+				for rows.Next() {
+					err := rows.Scan(&sensor_uuid, &sensor_name)
+					if err != nil {
+						log.Println(err)
+					}
+				}
+				j_frame := map[string]interface{}{
+					"status":      mImageStatus[sensor_serial],
+					"group_uuid":  mGroupUUIDs[sensor_serial],
+					"sensor_name": sensor_name,
+					"sensor_uuid": sensor_uuid,
+					"settop_uuid": settop_uuid,
+				}
+
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 				client.Publish(set_topic, 1, false, frameJSON)
@@ -684,49 +698,70 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				// mEventEndTimes = make(map[string]int64)
 				var settop_uuid string
 				var group_uuid string
-				if mGroupUUIDs[sensor_serial] == nil {
-					query := fmt.Sprintf(`
+				var sensor_uuid string
+				var sensor_name string
+
+				query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
 
-					rows1, err := db.Query(query)
+				rows1, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows1.Close()
+				for rows1.Next() {
+					err := rows1.Scan(&settop_uuid)
 					if err != nil {
 						log.Println(err)
 					}
-					defer rows1.Close()
-					for rows1.Next() {
-						err := rows1.Scan(&settop_uuid)
-						if err != nil {
-							log.Println(err)
-						}
 
-						query2 := fmt.Sprintf(`
+					query2 := fmt.Sprintf(`
 							SELECT group_uuid 
 							FROM group_gateway 
 							WHERE settop_uuid = '%s'
 						`, settop_uuid)
 
-						rows2, err := db.Query(query2)
+					rows2, err := db.Query(query2)
+					if err != nil {
+						log.Println(err)
+					}
+					defer rows2.Close()
+
+					for rows2.Next() {
+						err := rows2.Scan(&group_uuid)
 						if err != nil {
 							log.Println(err)
 						}
-						defer rows2.Close()
-
-						for rows2.Next() {
-							err := rows2.Scan(&group_uuid)
-							if err != nil {
-								log.Println(err)
-							}
-							mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-						}
+						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 					}
 				}
 
+				query = fmt.Sprintf(`
+					SELECT uuid, name 
+					FROM sensor 
+					WHERE serial = '%s'
+				`, sensor_serial)
+
+				rows, err := db.Query(query)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows.Close()
+				for rows.Next() {
+					err := rows.Scan(&sensor_uuid, &sensor_name)
+					if err != nil {
+						log.Println(err)
+					}
+				}
 				j_frame := map[string]interface{}{
-					"status":     mImageStatus[sensor_serial],
-					"group_uuid": mGroupUUIDs[sensor_serial],
+					"status":      mImageStatus[sensor_serial],
+					"group_uuid":  mGroupUUIDs[sensor_serial],
+					"sensor_name": sensor_name,
+					"sensor_uuid": sensor_uuid,
+					"settop_uuid": settop_uuid,
 				}
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
@@ -748,51 +783,71 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 
 			var settop_uuid string
+			var sensor_uuid string
+			var sensor_name string
 			var group_uuid string
 
-			if mGroupUUIDs[sensor_serial] == nil {
-				query := fmt.Sprintf(`
+			query := fmt.Sprintf(`
 				SELECT uuid 
 				FROM settop 
 				WHERE serial = '%s'
 			`, settop_serial)
 
-				rows1, err := db.Query(query)
+			rows1, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows1.Close()
+			for rows1.Next() {
+				err := rows1.Scan(&settop_uuid)
 				if err != nil {
 					log.Println(err)
 				}
-				defer rows1.Close()
-				for rows1.Next() {
-					err := rows1.Scan(&settop_uuid)
-					if err != nil {
-						log.Println(err)
-					}
-
-					query2 := fmt.Sprintf(`
+				query2 := fmt.Sprintf(`
 						SELECT group_uuid 
 						FROM group_gateway 
 						WHERE settop_uuid = '%s'
 					`, settop_uuid)
 
-					rows2, err := db.Query(query2)
+				rows2, err := db.Query(query2)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows2.Close()
+
+				for rows2.Next() {
+					err := rows2.Scan(&group_uuid)
 					if err != nil {
 						log.Println(err)
 					}
-					defer rows2.Close()
-
-					for rows2.Next() {
-						err := rows2.Scan(&group_uuid)
-						if err != nil {
-							log.Println(err)
-						}
-						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-					}
+					mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 				}
-
 			}
+
+			query = fmt.Sprintf(`
+				SELECT uuid, name 
+				FROM sensor 
+				WHERE serial = '%s'
+			`, sensor_serial)
+
+			rows, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&sensor_uuid, &sensor_name)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+
 			j_frame := map[string]interface{}{
-				"status":     mImageStatus[sensor_serial],
-				"group_uuid": mGroupUUIDs[sensor_serial],
+				"status":      mImageStatus[sensor_serial],
+				"group_uuid":  mGroupUUIDs[sensor_serial],
+				"sensor_name": sensor_name,
+				"sensor_uuid": sensor_uuid,
+				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
@@ -1068,24 +1123,122 @@ func createFolder(folderPath string) error {
 	return nil
 }
 
+func getSensorDataTables(db *sql.DB) ([]string, error) {
+	query := "SHOW TABLES"
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sensorTables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return nil, err
+		}
+		columnNames, err := getSensorDataColumns(db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		// 특정 컬럼이 포함된 테이블만 선택
+		if containsSensorDataColumns(columnNames) {
+			sensorTables = append(sensorTables, tableName)
+		}
+	}
+
+	return sensorTables, nil
+}
+
+func getSensorDataColumns(db *sql.DB, sensorSerial string) ([]string, error) {
+	query := fmt.Sprintf("SHOW COLUMNS FROM %s", sensorSerial)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println("Error querying columns:", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columnNames []string
+	for rows.Next() {
+		var columnName, a, b, c, d, e *string
+		if err := rows.Scan(&columnName, &a, &b, &c, &d, &e); err != nil {
+			log.Println("Error scanning column name:", err)
+			return nil, err
+		}
+		log.Println("ColumnName:", columnName)
+		columnNames = append(columnNames, *columnName)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Println("Error iterating over rows:", err)
+		return nil, err
+	}
+
+	return columnNames, nil
+}
+
+func containsSensorDataColumns(columns []string) bool {
+	for _, columnName := range columns {
+		if columnName == "min_temp" || columnName == "max_temp" {
+			return true
+		}
+	}
+	return false
+}
+
+var sensorMutex sync.Mutex
+var folderMutex sync.Mutex
+
 func deleteOldImages(basePath string) {
-	ticker := time.NewTicker(7 * 24 * time.Hour) // 24시간마다 실행
+	ticker := time.NewTicker(1 * 24 * time.Hour) // 24시간마다 실행
 	// ticker := time.NewTicker(10 * time.Second) //test
 
 	for {
 		select {
 		case <-ticker.C:
-			// history 삭제 (7주일 보관)==
-			deleteOldDataWithTransaction(db)
+			// history 삭제 (7일 보관)==
+			sensorNames, err := getSensorDataTables(db)
+			resultChannel := make(chan error, len(sensorNames))
+			for _, sensorName := range sensorNames {
+				go func(sensor string) {
+					sensorMutex.Lock()
+					defer sensorMutex.Unlock()
+					resultChannel <- deleteOldDataWithTransaction(db, sensor)
+				}(sensorName)
+			}
+			for i := 0; i < len(sensorNames); i++ {
+				err := <-resultChannel
+				if err != nil {
+					log.Println("Error deleting old data:", err)
+				}
+			}
+			close(resultChannel)
+
 			folders, err := getFolders(basePath)
 			if err != nil {
 				log.Println("Error getting folders:", err)
 				continue
 			}
+			resultFolderChannel := make(chan error, len(folders))
 
 			for _, folder := range folders {
-				deleteOldImagesInFolder(filepath.Join(basePath, folder))
+				go func(folderPath string) {
+					folderMutex.Lock()
+					defer folderMutex.Unlock()
+					resultFolderChannel <- deleteOldImagesInFolder(filepath.Join(basePath, folderPath))
+				}(folder)
 			}
+
+			for i := 0; i < len(folders); i++ {
+				err := <-resultFolderChannel
+				if err != nil {
+					log.Println("Error deleting old images in folder:", err)
+				}
+			}
+
+			close(resultFolderChannel)
 		}
 	}
 }
@@ -1106,8 +1259,10 @@ func getFolders(basePath string) ([]string, error) {
 	return folders, nil
 }
 
-func deleteOldDataWithTransaction(db *sql.DB) error {
+func deleteOldDataWithTransaction(db *sql.DB, sensorSerial string) error {
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
+	// sevenDaysAgo := time.Now().Add(-10 * time.Second)
+
 	formattedSevenDaysAgo := sevenDaysAgo.Format("2006-01-02 15:04:05")
 
 	tx, err := db.Begin()
@@ -1116,11 +1271,11 @@ func deleteOldDataWithTransaction(db *sql.DB) error {
 	}
 
 	deleteQuery := fmt.Sprintf(`
-			DELETE FROM history
-			WHERE date < '%s'
-		`, formattedSevenDaysAgo)
+        DELETE FROM %s
+        WHERE date < ?
+    `, sensorSerial)
 
-	_, err = tx.Exec(deleteQuery)
+	_, err = tx.Exec(deleteQuery, formattedSevenDaysAgo)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -1134,19 +1289,20 @@ func deleteOldDataWithTransaction(db *sql.DB) error {
 	return nil
 }
 
-func deleteOldImagesInFolder(folderPath string) {
+func deleteOldImagesInFolder(folderPath string) error {
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			if info.ModTime().Before(time.Now().Add(-8 * 24 * time.Hour)) {
-				// if info.ModTime().Before(time.Now().Add(10 * time.Second)) {
+			if info.ModTime().Before(time.Now().Add(-7 * 24 * time.Hour)) {
+				// if info.ModTime().Before(time.Now().Add(-10 * time.Second)) {
 				err := os.Remove(path)
 				if err != nil {
+					return fmt.Errorf("error deleting file %s: %w", path, err)
 					fmt.Println("Error deleting file:", err)
 				} else {
-					fmt.Println("Deleted file:", path)
+					// fmt.Println("Deleted file:", path)
 				}
 			}
 		}
@@ -1156,12 +1312,13 @@ func deleteOldImagesInFolder(folderPath string) {
 		log.Println("Error deleting old images in folder:", err)
 	}
 
-	err = os.RemoveAll(folderPath)
-	if err != nil {
-		fmt.Println("Error deleting folder:", err)
-	} else {
-		fmt.Println("Deleted folder:", folderPath)
-	}
+	// err = os.RemoveAll(folderPath)
+	// if err != nil {
+	// 	fmt.Println("Error deleting folder:", err)
+	// } else {
+	// 	fmt.Println("Deleted folder:", folderPath)
+	// }
+	return nil
 }
 
 func SendMessageHandler(title string, body string, style string, topic string) {
@@ -1304,6 +1461,7 @@ func subscribeHandler(client mqtt.Client, topic string) {
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	broker_mutex.Lock()
 	defer broker_mutex.Unlock()
+	log.Println("111")
 
 	var settop_serial string
 	mac := parts[3]
@@ -1313,12 +1471,12 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 		WHERE mac1 = '%s' OR mac2 = '%s'
 	`,
 		mac, mac)
-
+	log.Println("222: ", mac)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
-
+	log.Println("?")
 	defer rows.Close()
 	for rows.Next() {
 		err := rows.Scan(&settop_serial)
@@ -1326,15 +1484,17 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 			log.Println(err)
 		}
 	}
-
+	log.Println("333")
 	if settop_serial == "" {
 		log.Println("err settop_serial mac : ", mac)
 		return
 	}
+	log.Println("444")
 	if mac == "" {
 		log.Println("err mac empty")
 		return
 	}
+	log.Println("555")
 	set_topic := base_topic + "/data/settop_sn/" + mac
 	message := settop_serial
 	log.Println(settop_serial)
@@ -1576,6 +1736,43 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 		if err != nil {
 			log.Println(err)
 		}
+	} else {
+		broker_mutex.Lock()
+		defer broker_mutex.Unlock()
+		var checkStatus string
+		var checkSerial string
+
+		query := fmt.Sprintf(`
+			SELECT status, serial 
+			FROM sensor 
+			WHERE mac = '%s'
+		`,
+			mac)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&checkStatus, &checkSerial)
+			if err != nil {
+				log.Println(err)
+			}
+			if checkStatus == "3" {
+				query = fmt.Sprintf(`
+				UPDATE sensor SET
+					status = '%s'
+				WHERE serial = '%s'
+				`,
+					"0", checkSerial)
+				_, err = db.Exec(query)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+		}
 	}
 	// else {
 	// 	aliveSensorLastAliveTime[mac] = time.Now()
@@ -1616,8 +1813,8 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 // }
 
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
-	// mu.Lock()
-	// defer mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
@@ -1626,28 +1823,9 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
 	mac := parts[4]
-	query := fmt.Sprintf(`
-		SELECT type 
-		FROM sensor 
-		WHERE serial = '%s'
-	`,
-		sensor_serial)
-
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&sensor_type)
-		if err != nil {
-			log.Println(err)
-		}
-	}
 
 	j_frame := map[string]interface{}{}
-	err = json.Unmarshal(msg.Payload(), &j_frame)
+	err := json.Unmarshal(msg.Payload(), &j_frame)
 	var status string
 	if err != nil { //sensor publish <<=
 		status = string(msg.Payload())
@@ -1655,50 +1833,70 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			log.Println("inspection called")
 			var settop_uuid string
 			var group_uuid string
+			var sensor_uuid string
+			var sensor_name string
 
-			if mGroupUUIDs[sensor_serial] == nil {
-				query := fmt.Sprintf(`
+			query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
 
-				rows1, err := db.Query(query)
+			rows1, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows1.Close()
+			for rows1.Next() {
+				err := rows1.Scan(&settop_uuid)
 				if err != nil {
 					log.Println(err)
 				}
-				defer rows1.Close()
-				for rows1.Next() {
-					err := rows1.Scan(&settop_uuid)
-					if err != nil {
-						log.Println(err)
-					}
 
-					query2 := fmt.Sprintf(`
+				query2 := fmt.Sprintf(`
 						SELECT group_uuid 
 						FROM group_gateway 
 						WHERE settop_uuid = '%s'
 					`, settop_uuid)
 
-					rows2, err := db.Query(query2)
+				rows2, err := db.Query(query2)
+				if err != nil {
+					log.Println(err)
+				}
+				defer rows2.Close()
+
+				for rows2.Next() {
+					err := rows2.Scan(&group_uuid)
 					if err != nil {
 						log.Println(err)
 					}
-					defer rows2.Close()
+					mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+				}
+			}
+			query = fmt.Sprintf(`
+				SELECT uuid, name 
+				FROM sensor 
+				WHERE serial = '%s'
+			`, sensor_serial)
 
-					for rows2.Next() {
-						err := rows2.Scan(&group_uuid)
-						if err != nil {
-							log.Println(err)
-						}
-						mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-					}
+			rows, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&sensor_uuid, &sensor_name)
+				if err != nil {
+					log.Println(err)
 				}
 			}
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			j_frame := map[string]interface{}{
-				"status":     "inspection",
-				"group_uuid": mGroupUUIDs[sensor_serial],
+				"status":      "inspection",
+				"group_uuid":  mGroupUUIDs[sensor_serial],
+				"sensor_name": sensor_name,
+				"sensor_uuid": sensor_uuid,
+				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
 			client.Publish(set_topic, 1, false, frameJSON)
@@ -1727,6 +1925,26 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 		result = 3
 	}
 	if result >= 0 {
+		query := fmt.Sprintf(`
+		SELECT type 
+		FROM sensor 
+		WHERE serial = '%s'
+	`,
+			sensor_serial)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&sensor_type)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+
 		message := eventMessage(settop_serial, getNullStringValidValue(sensor_type), result, sensor_serial)
 		var settop_uuid string
 		var group_uuid string
@@ -1768,13 +1986,13 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			}
 		}
 		var group_master_uuid string
-		query := fmt.Sprintf(`
+		query = fmt.Sprintf(`
 			SELECT uuid 
 			FROM group_ 
 			WHERE name = 'master'
 		`)
 
-		rows, err := db.Query(query)
+		rows, err = db.Query(query)
 		if err != nil {
 			log.Println(err)
 		}
@@ -1785,6 +2003,7 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				log.Println(err)
 			}
 		}
+		log.Println("222", sensor_serial)
 		SendMessageHandler("Trusafer", message, "style", group_master_uuid)
 
 		query = fmt.Sprintf(`
