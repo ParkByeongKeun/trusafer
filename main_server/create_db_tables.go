@@ -284,8 +284,6 @@ func initPermission() {
 }
 
 func initGroup() {
-	uuidDefault := uuid.New()
-
 	var count int
 	countQuery := "SELECT COUNT(*) FROM group_"
 	err := db.QueryRow(countQuery).Scan(&count)
@@ -293,7 +291,9 @@ func initGroup() {
 		log.Printf(" - query count from group_ table err: %s", err)
 		return
 	}
+
 	if count == 0 {
+		uuidDefault := uuid.New()
 		insertQuery := fmt.Sprintf(`
 			INSERT INTO group_ (uuid, name)
 			VALUES 
@@ -303,6 +303,31 @@ func initGroup() {
 		)
 
 		_, err := db.Exec(insertQuery)
+		if err != nil {
+			log.Printf(" - insert data into group table err: %s", err)
+			return
+		}
+
+		log.Println(" - data inserted into group table")
+	}
+
+	var default_count int
+	defaultCountQuery := "SELECT COUNT(*) FROM group_ WHERE name = 'default'"
+	defaultErr := db.QueryRow(defaultCountQuery).Scan(&default_count)
+	if defaultErr != nil {
+		log.Printf(" - query count from group_ table err: %s", err)
+		return
+	}
+
+	if default_count == 0 {
+		uuid_new := uuid.New()
+		insertQuery := `
+            INSERT INTO group_ (uuid, name)
+            VALUES 
+            (?, ?)
+        `
+
+		_, err := db.Exec(insertQuery, uuid_new.String(), "default")
 		if err != nil {
 			log.Printf(" - insert data into group table err: %s", err)
 			return

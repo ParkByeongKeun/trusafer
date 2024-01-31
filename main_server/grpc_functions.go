@@ -304,8 +304,44 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 	}
 
 	response.Registerer = registererList
+
+	var group_default_uuid string
+	query = fmt.Sprintf(`
+		SELECT uuid 
+		FROM group_ 
+		WHERE name = 'default'
+	`)
+
+	rows, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&group_default_uuid)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+	}
+
+	query = fmt.Sprintf(`
+		INSERT INTO group_gateway (group_uuid, registerer_uuid)
+		VALUES ('%s', '%s')`,
+		group_default_uuid, uuid_)
+
+	sqlAddRegisterer, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		return nil, err
+	}
+	defer sqlAddRegisterer.Close()
+
 	return response, nil
 }
+
 func (s *server) UpdateRegisterer(ctx context.Context, in *pb.UpdateRegistererRequest) (*pb.UpdateRegistererResponse, error) {
 	var permission_uuid string
 	permission := s.getPermission(ctx)
@@ -486,6 +522,43 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			}
 			group_uuids = append(group_uuids, group_uuid)
 		}
+		if len(group_uuids) == 0 {
+			var group_default_uuid string
+
+			query := fmt.Sprintf(`
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'default'
+		`)
+
+			rows, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&group_default_uuid)
+				if err != nil {
+					log.Println(err)
+					return nil, err
+				}
+			}
+
+			query = fmt.Sprintf(`
+            INSERT INTO group_gateway (group_uuid, registerer_uuid)
+            VALUES ('%s', '%s')`,
+				group_default_uuid, uuid_)
+
+			sqlAddRegisterer, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+				return nil, err
+			}
+			defer sqlAddRegisterer.Close()
+		}
+
 		if permission_uuid != "" {
 			permissionQuery := fmt.Sprintf(`
 				SELECT user, permission, settop_create, sensor_info, ip_module, threshold, sensor_history  
@@ -587,6 +660,42 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			Name:          in.GetName(),
 		}
 		response.RegistererInfo = registerer
+
+		var group_default_uuid string
+
+		query = fmt.Sprintf(`
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'default'
+		`)
+
+		rows, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_default_uuid)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+		}
+
+		query = fmt.Sprintf(`
+            INSERT INTO group_gateway (group_uuid, registerer_uuid)
+            VALUES ('%s', '%s')`,
+			group_default_uuid, genUUID)
+
+		sqlAddRegisterer, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+		defer sqlAddRegisterer.Close()
+
 	}
 	response.PermissionUuid = permission_uuid
 	// registererInfoMapping.RemoveRegistererInfoMapping(response.Uuid)
@@ -833,6 +942,60 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 	}
 	response.Uuid = uuid.String()
 	defer sqlAddRegisterer.Close()
+
+	if len(in.GetGroupUuid()) > 0 {
+		for _, group_uuid := range in.GetGroupUuid() {
+			query := fmt.Sprintf(`
+				INSERT INTO group_gateway (group_uuid, settop_uuid)
+				VALUES ('%s', '%s')`,
+				group_uuid, uuid.String())
+
+			sqlAddRegisterer, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+				err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+				return nil, err
+			}
+
+			defer sqlAddRegisterer.Close()
+		}
+	} else {
+		var group_default_uuid string
+
+		query = fmt.Sprintf(`
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'default'
+		`)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_default_uuid)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+		}
+		query := fmt.Sprintf(`
+				INSERT INTO group_gateway (group_uuid, settop_uuid)
+				VALUES ('%s', '%s')`,
+			group_default_uuid, uuid.String())
+
+		sqlAddRegisterer, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+
+		defer sqlAddRegisterer.Close()
+	}
+
 	return response, nil
 }
 
@@ -1917,7 +2080,33 @@ func (s *server) UpdateGroup(ctx context.Context, in *pb.UpdateGroupRequest) (*p
 func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*pb.DeleteGroupResponse, error) {
 	log.Printf("Received DeleteGroup")
 
+	var group_name string
+
 	query := fmt.Sprintf(`
+	SELECT name 
+	FROM group_ 
+	WHERE uuid = '%s'
+	`, in.GetGroupUuid())
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&group_name)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+	}
+	if group_name == "default" {
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: Default groups cannot be deleted.")
+		return nil, err
+	}
+
+	query = fmt.Sprintf(`
 		DELETE FROM group_
 		WHERE uuid = '%s'
 		`,
@@ -1976,7 +2165,7 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 	WHERE email = '%s' AND group_uuid = '%s' 
 	`, claims.Email, in.GetGroupUuid())
 
-	rows, err := db.Query(query)
+	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
@@ -2804,6 +2993,65 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 	}
 	defer mainListMapping.RemoveMapping(in.GetGroupUuid())
 
+	var group_uuid string
+
+	query = fmt.Sprintf(`
+			SELECT group_uuid 
+			FROM group_gateway 
+			WHERE registerer_uuid = '%s'
+		`, in.GetRegistererUuid())
+
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&group_uuid)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+	}
+
+	if len(group_uuid) == 0 {
+		var group_default_uuid string
+
+		query := fmt.Sprintf(`
+		SELECT uuid 
+		FROM group_ 
+		WHERE name = 'default'
+	`)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_default_uuid)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+		}
+
+		query = fmt.Sprintf(`
+		INSERT INTO group_gateway (group_uuid, registerer_uuid)
+		VALUES ('%s', '%s')`,
+			group_default_uuid, in.GetRegistererUuid())
+
+		sqlAddRegisterer, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+		defer sqlAddRegisterer.Close()
+	}
+
 	return &pb.DeleteRegistererGroupResponse{}, nil
 }
 
@@ -2976,6 +3224,66 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 		return nil, err
 	}
 	fmt.Println("delete count : ", nRow)
+
+	var group_uuid string
+
+	query = fmt.Sprintf(`
+			SELECT group_uuid 
+			FROM group_gateway 
+			WHERE settop_uuid = '%s'
+		`, in.GetSettopUuid())
+
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&group_uuid)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+	}
+
+	if len(group_uuid) == 0 {
+		var group_default_uuid string
+
+		query := fmt.Sprintf(`
+		SELECT uuid 
+		FROM group_ 
+		WHERE name = 'default'
+	`)
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&group_default_uuid)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+		}
+
+		query = fmt.Sprintf(`
+		INSERT INTO group_gateway (group_uuid, settop_uuid)
+		VALUES ('%s', '%s')`,
+			group_default_uuid, in.GetSettopUuid())
+
+		sqlAddRegisterer, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+			return nil, err
+		}
+		defer sqlAddRegisterer.Close()
+	}
+
 	return &pb.DeleteSettopGroupResponse{}, nil
 }
 
@@ -3289,7 +3597,7 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 			mainSettop := &pb.MainSettop{}
 			mainSettop.Serial = serial
 			mainSettop.Address = address
-
+			address = ""
 			query = fmt.Sprintf(`
 			SELECT group_uuid 
 			FROM group_gateway 
@@ -3405,7 +3713,7 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 					mainSettop := &pb.MainSettop{}
 					mainSettop.Serial = serial
 					mainSettop.Address = address
-
+					address = ""
 					query = fmt.Sprintf(`
 				SELECT group_uuid 
 				FROM group_gateway 
