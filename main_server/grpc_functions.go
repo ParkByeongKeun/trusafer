@@ -107,7 +107,6 @@ func DeleteRegistererInfo(s *server, ctx context.Context) {
 	if err != nil {
 		log.Println(err)
 	}
-
 	defer registererInfoMapping.RemoveRegistererInfoMapping(registererinfo.GetRegistererInfo().GetUuid())
 }
 
@@ -121,6 +120,7 @@ type ThresholdMapping struct {
 }
 
 // ============================Threshold Mapping====================================================
+
 func NewThresholdMapping() *ThresholdMapping {
 	return &ThresholdMapping{
 		mapping: make(map[string][]*pb.Threshold),
@@ -153,7 +153,6 @@ func DeleteThreshold(s *server, ctx context.Context) {
 	if err != nil {
 		log.Println(err)
 	}
-
 	defer thresholdMapping.RemoveThresholdMapping(registererinfo.GetRegistererInfo().GetUuid())
 }
 
@@ -223,7 +222,6 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 		FROM permission 
 		WHERE name = '%s'
 		`, "default")
-
 		rows, err := db.Query(defaultPermissionQuery)
 		if err != nil {
 			log.Println(err)
@@ -261,7 +259,6 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 		return nil, err
 	}
 	defer sqlAddRegisterer.Close()
-
 	var uuid_ string
 	var auth_email string
 	var company_name string
@@ -270,7 +267,6 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 	var is_alarm uint64
 	var permission_uuid string
 	var name string
-
 	query = fmt.Sprintf(`
 		SELECT uuid, auth_email, company_name, company_number, status, is_alarm, permission_uuid, name  
 		FROM registerer 
@@ -285,13 +281,11 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 	defer rows.Close()
 	response := &pb.CreateRegistererResponse{}
 	registererList := &pb.Registerer{}
-
 	for rows.Next() {
 		err := rows.Scan(&uuid_, &auth_email, &company_name, &company_number, &status_, &is_alarm, &permission_uuid, &name)
 		if err != nil {
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Failed to scan registerer rows: %v", err)
-
 		}
 		registererList.Uuid = uuid_
 		registererList.AuthEmail = auth_email
@@ -302,16 +296,13 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 		registererList.PermissionUuid = permission_uuid
 		registererList.Name = name
 	}
-
 	response.Registerer = registererList
-
 	var group_default_uuid string
 	query = fmt.Sprintf(`
 		SELECT uuid 
 		FROM group_ 
 		WHERE name = 'default'
 	`)
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -325,12 +316,10 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 			return nil, err
 		}
 	}
-
 	query = fmt.Sprintf(`
 		INSERT INTO group_gateway (group_uuid, registerer_uuid)
 		VALUES ('%s', '%s')`,
 		group_default_uuid, uuid_)
-
 	sqlAddRegisterer, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -338,7 +327,6 @@ func (s *server) CreateRegisterer(ctx context.Context, in *pb.CreateRegistererRe
 		return nil, err
 	}
 	defer sqlAddRegisterer.Close()
-
 	return response, nil
 }
 
@@ -400,18 +388,6 @@ func (s *server) UpdateRegisterer(ctx context.Context, in *pb.UpdateRegistererRe
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		return nil, err
 	}
-	// affectedCount, err := sqlUpdateRegisterer.RowsAffected()
-	// if err != nil {
-	// 	log.Println("affected count error after update query: ", err)
-	// 	err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
-	// 	return nil, err
-	// }
-	// log.Println("update users complete: ", affectedCount)
-	// if affectedCount == 0 {
-	// 	log.Println(err)
-	// 	err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-	// 	return nil, err
-	// }
 	return &pb.UpdateRegistererResponse{}, nil
 }
 
@@ -455,7 +431,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 	}
 	token := authHeaders[0]
 	claims := &Claims{}
-
 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(string(Conf.Jwt.SecretKeyAT)), nil
 	})
@@ -463,7 +438,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 		log.Println("Invalid authentication token")
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	log.Printf("Received GetRegisterer")
 	response := &pb.ReadRegistererResponse{}
 	var uuid_ string
@@ -497,7 +471,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 		return nil, status.Errorf(codes.Internal, "Failed to fetch registerer information: %v", err)
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&uuid_, &auth_email, &company_name, &company_number, &status_, &is_alarm, &permission_uuid, &name)
 		if err != nil {
@@ -510,9 +483,7 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			FROM group_gateway 
 			WHERE registerer_uuid = '%s'
 		`, uuid_)
-
 		rows1, _ := db.Query(query)
-
 		defer rows1.Close()
 		for rows1.Next() {
 			err := rows1.Scan(&group_uuid)
@@ -524,13 +495,11 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 		}
 		if len(group_uuids) == 0 {
 			var group_default_uuid string
-
 			query := fmt.Sprintf(`
 			SELECT uuid 
 			FROM group_ 
 			WHERE name = 'default'
 		`)
-
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -544,12 +513,10 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 					return nil, err
 				}
 			}
-
 			query = fmt.Sprintf(`
             INSERT INTO group_gateway (group_uuid, registerer_uuid)
             VALUES ('%s', '%s')`,
 				group_default_uuid, uuid_)
-
 			sqlAddRegisterer, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -558,7 +525,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			}
 			defer sqlAddRegisterer.Close()
 		}
-
 		if permission_uuid != "" {
 			permissionQuery := fmt.Sprintf(`
 				SELECT user, permission, settop_create, sensor_info, ip_module, threshold, sensor_history  
@@ -598,7 +564,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 		}
 		response.RegistererInfo = registerer
 	}
-
 	if response.RegistererInfo == nil {
 		var firstPermissionUUID string
 		var permission_name string
@@ -615,7 +580,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			FROM permission 
 			WHERE name = '%s'
 			`, permission_name)
-
 		rows, err := db.Query(defaultPermissionQuery)
 		if err != nil {
 			log.Println(err)
@@ -643,7 +607,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 				name = '%s'
 			`,
 			genUUID, claims.Email, "", "", user_status, 1, firstPermissionUUID, in.GetName())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -660,15 +623,12 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			Name:          in.GetName(),
 		}
 		response.RegistererInfo = registerer
-
 		var group_default_uuid string
-
 		query = fmt.Sprintf(`
 			SELECT uuid 
 			FROM group_ 
 			WHERE name = 'default'
 		`)
-
 		rows, err = db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -682,7 +642,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 				return nil, err
 			}
 		}
-
 		query = fmt.Sprintf(`
             INSERT INTO group_gateway (group_uuid, registerer_uuid)
             VALUES ('%s', '%s')`,
@@ -695,11 +654,8 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 			return nil, err
 		}
 		defer sqlAddRegisterer.Close()
-
 	}
 	response.PermissionUuid = permission_uuid
-	// registererInfoMapping.RemoveRegistererInfoMapping(response.Uuid)
-	// registererInfoMapping.AddRegistererInfodMapping(response.Uuid, response)
 	return response, nil
 }
 
@@ -942,32 +898,27 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 	}
 	response.Uuid = uuid.String()
 	defer sqlAddRegisterer.Close()
-
 	if len(in.GetGroupUuid()) > 0 {
 		for _, group_uuid := range in.GetGroupUuid() {
 			query := fmt.Sprintf(`
 				INSERT INTO group_gateway (group_uuid, settop_uuid)
 				VALUES ('%s', '%s')`,
 				group_uuid, uuid.String())
-
 			sqlAddRegisterer, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
 				err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 				return nil, err
 			}
-
 			defer sqlAddRegisterer.Close()
 		}
 	} else {
 		var group_default_uuid string
-
 		query = fmt.Sprintf(`
 			SELECT uuid 
 			FROM group_ 
 			WHERE name = 'default'
 		`)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -985,23 +936,19 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 				INSERT INTO group_gateway (group_uuid, settop_uuid)
 				VALUES ('%s', '%s')`,
 			group_default_uuid, uuid.String())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
 		}
-
 		defer sqlAddRegisterer.Close()
 	}
-
 	return response, nil
 }
 
 func (s *server) UpdateSettop(ctx context.Context, in *pb.UpdateSettopRequest) (*pb.UpdateSettopResponse, error) {
 	DeleteMainList(s, ctx)
-
 	permission := s.getPermission(ctx)
 	if !permission.SettopCreate {
 		log.Println("err permission")
@@ -1079,7 +1026,6 @@ func (s *server) DeleteSettop(ctx context.Context, in *pb.DeleteSettopRequest) (
 		WHERE uuid = '%s'
 		`,
 		in.GetSettopUuid())
-
 	sqlDeleteSettop, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1138,7 +1084,6 @@ func (s *server) ReadSettop(ctx context.Context, in *pb.ReadSettopRequest) (*pb.
 	`,
 			place_uuid)
 		rows1, err := db.Query(query1)
-
 		if err != nil {
 			log.Println(err)
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
@@ -1174,7 +1119,6 @@ func (s *server) ReadSettop(ctx context.Context, in *pb.ReadSettopRequest) (*pb.
 func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListRequest) (*pb.ReadSettopListResponse, error) {
 	log.Printf("Received GetSettopList: success")
 	response := &pb.ReadSettopListResponse{}
-
 	var group_settop_uuid sql.NullString
 	var uuid string
 	var place_uuid string
@@ -1186,7 +1130,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 	var is_alive bool
 	var fw_version string
 	var registered_time string
-
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
@@ -1200,14 +1143,12 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 	}
 	token := authHeaders[0]
 	claims := &Claims{}
-
 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(string(Conf.Jwt.SecretKeyAT)), nil
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	if claims.Admin {
 		query := fmt.Sprintf(`
 		SELECT uuid, place_uuid, serial, room, floor, mac1, mac2, is_alive, fw_version, registered_time  
@@ -1220,7 +1161,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 			return nil, err
 		}
 		defer rows.Close()
-
 		for rows.Next() {
 			err := rows.Scan(&uuid, &place_uuid, &serial, &room, &floor, &mac1, &mac2, &is_alive, &fw_version, &registered_time)
 			if err != nil {
@@ -1231,12 +1171,11 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 			var place_name string
 			var place_address string
 			query1 := fmt.Sprintf(`
-			SELECT name, address
-			FROM place 
-			WHERE uuid = '%s'
-		`,
+				SELECT name, address
+				FROM place 
+				WHERE uuid = '%s'
+			`,
 				place_uuid)
-
 			rows1, err := db.Query(query1)
 
 			if err != nil {
@@ -1245,7 +1184,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 				return nil, err
 			}
 			defer rows1.Close()
-
 			for rows1.Next() {
 				err := rows1.Scan(&place_name, &place_address)
 				if err != nil {
@@ -1255,7 +1193,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 				}
 			}
 			settopList := &pb.SettopInfo{}
-
 			settopList.Uuid = uuid
 			settopList.PlaceUuid = place_uuid
 			settopList.Serial = serial
@@ -1272,38 +1209,31 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 		}
 	} else {
 		groupSettopUUIDs := make(map[string]bool)
-
 		readRegistererResponse, _ := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
 			Name: "check",
 		})
-
 		for _, group_uuid := range readRegistererResponse.GetRegistererInfo().GetGroupUuid() {
 			query := fmt.Sprintf(`
 			SELECT settop_uuid  
 			FROM group_gateway 
 			WHERE group_uuid = '%s'
 			`, group_uuid)
-
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
 				return nil, err
 			}
 			defer rows.Close()
-
 			for rows.Next() {
 				err := rows.Scan(&group_settop_uuid)
 				if err != nil {
 					log.Println(err)
 					return nil, err
 				}
-
 				if getNullStringValidValue(group_settop_uuid) == "" || groupSettopUUIDs[getNullStringValidValue(group_settop_uuid)] {
 					continue
 				}
-
 				groupSettopUUIDs[getNullStringValidValue(group_settop_uuid)] = true
-
 				query := fmt.Sprintf(`
 				SELECT uuid, place_uuid, serial, room, floor, mac1, mac2, is_alive, fw_version, registered_time  
 				FROM settop 
@@ -1316,7 +1246,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 					return nil, err
 				}
 				defer rows.Close()
-
 				for rows.Next() {
 					err := rows.Scan(&uuid, &place_uuid, &serial, &room, &floor, &mac1, &mac2, &is_alive, &fw_version, &registered_time)
 					if err != nil {
@@ -1327,21 +1256,18 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 					var place_name string
 					var place_address string
 					query1 := fmt.Sprintf(`
-					SELECT name, address
-					FROM place 
-					WHERE uuid = '%s'
-				`,
+						SELECT name, address
+						FROM place 
+						WHERE uuid = '%s'
+					`,
 						place_uuid)
-
 					rows1, err := db.Query(query1)
-
 					if err != nil {
 						log.Println(err)
 						err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 						return nil, err
 					}
 					defer rows1.Close()
-
 					for rows1.Next() {
 						err := rows1.Scan(&place_name, &place_address)
 						if err != nil {
@@ -1351,7 +1277,6 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 						}
 					}
 					settopList := &pb.SettopInfo{}
-
 					settopList.Uuid = uuid
 					settopList.PlaceUuid = place_uuid
 					settopList.Serial = serial
@@ -1366,18 +1291,14 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 					settopList.PlaceName = place_name
 					response.SettopList = append(response.SettopList, settopList)
 				}
-
 			}
-
 		}
 	}
-
 	return response, nil
 }
 
 func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (*pb.CreateSensorResponse, error) {
 	DeleteMainList(s, ctx)
-
 	log.Printf("Received AddSensor: %s, %s, %d, %s, %s, %s, %s",
 		in.Sensor.GetUuid(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
 		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
@@ -1385,11 +1306,9 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 	var uuid = uuid.New()
 	response := &pb.CreateSensorResponse{}
 	var thresholds []*pb.Threshold
-
 	for _, threshold := range in.Sensor.Thresholds {
 		thresholds = append(thresholds, threshold)
 	}
-
 	if len(thresholds) < 9 {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request")
 	}
@@ -1408,7 +1327,6 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 		uuid.String(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
 		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
 		in.Sensor.GetRegisteredTime(), in.Sensor.IpModuleMac, in.Sensor.GetName())
-
 	sqlAddSensor, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1416,7 +1334,6 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 		return nil, err
 	}
 	defer sqlAddSensor.Close()
-
 	query = fmt.Sprintf(`
 		INSERT IGNORE INTO threshold SET
 			sensor_uuid = '%s', 
@@ -1448,7 +1365,6 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 		thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
 		thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
 		thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger())
-
 	sqlThresh, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1456,9 +1372,7 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 		return nil, err
 	}
 	defer sqlThresh.Close()
-
 	response.Uuid = uuid.String()
-
 	return response, nil
 }
 
@@ -1471,11 +1385,9 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 	}
 	var thresholds []*pb.Threshold
-
 	for _, threshold := range in.Sensor.Thresholds {
 		thresholds = append(thresholds, threshold)
 	}
-
 	if len(thresholds) < 9 {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request")
 	}
@@ -1483,12 +1395,10 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		in.Sensor.GetUuid(), in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
 		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
 		in.Sensor.GetRegisteredTime(), in.Sensor.GetName())
-
 	if !permission.Threshold {
 		sensorResponse, _ := s.ReadSensor(ctx, &pb.ReadSensorRequest{
 			SensorUuid: in.GetSensor().GetUuid(),
 		})
-
 		if !reflect.DeepEqual(sensorResponse.Sensor.GetThresholds(), in.Sensor.GetThresholds()) {
 			log.Println("err permission")
 			return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
@@ -1532,7 +1442,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 	}
 
 	if count == 0 {
-		// 레코드가 없으면 INSERT 수행
 		insertQuery := fmt.Sprintf(`
 		INSERT IGNORE INTO threshold SET
 		sensor_uuid = '%s', 
@@ -1564,35 +1473,34 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
 			thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
 			thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger())
-
 		if _, err := db.Exec(insertQuery); err != nil {
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		}
 	} else {
 		query = fmt.Sprintf(`
-	UPDATE threshold SET
-			temp_warning1 = '%s',
-			temp_danger1 = '%s',
-			temp_warning2 = '%s',
-			temp_danger2 = '%s',
-			temp_warning3 = '%s',
-			temp_danger3 = '%s',
-			temp_warning4 = '%s',
-			temp_danger4 = '%s',
-			temp_warning5 = '%s',
-			temp_danger5 = '%s',
-			temp_warning6 = '%s',
-			temp_danger6 = '%s',
-			temp_warning7 = '%s',
-			temp_danger7 = '%s',
-			temp_warning8 = '%s',
-			temp_danger8 = '%s',
-			temp_warning9 = '%s',
-			temp_danger9 = '%s'
-			WHERE sensor_uuid = '%s'
+		UPDATE threshold SET
+				temp_warning1 = '%s',
+				temp_danger1 = '%s',
+				temp_warning2 = '%s',
+				temp_danger2 = '%s',
+				temp_warning3 = '%s',
+				temp_danger3 = '%s',
+				temp_warning4 = '%s',
+				temp_danger4 = '%s',
+				temp_warning5 = '%s',
+				temp_danger5 = '%s',
+				temp_warning6 = '%s',
+				temp_danger6 = '%s',
+				temp_warning7 = '%s',
+				temp_danger7 = '%s',
+				temp_warning8 = '%s',
+				temp_danger8 = '%s',
+				temp_warning9 = '%s',
+				temp_danger9 = '%s'
+				WHERE sensor_uuid = '%s'
 
-		`,
+			`,
 			thresholds[0].GetTempWarning(), thresholds[0].GetTempDanger(),
 			thresholds[1].GetTempWarning(), thresholds[1].GetTempDanger(),
 			thresholds[2].GetTempWarning(), thresholds[2].GetTempDanger(),
@@ -1602,7 +1510,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			thresholds[6].GetTempWarning(), thresholds[6].GetTempDanger(),
 			thresholds[7].GetTempWarning(), thresholds[7].GetTempDanger(),
 			thresholds[8].GetTempWarning(), thresholds[8].GetTempDanger(), in.Sensor.GetUuid())
-
 		sqlThresh, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -1611,7 +1518,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		}
 		defer sqlThresh.Close()
 	}
-
 	var settop_serial string
 	query = fmt.Sprintf(`
 		SELECT serial
@@ -1619,7 +1525,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		WHERE uuid = '%s'
 		`,
 		in.Sensor.GetSettopUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1627,7 +1532,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&settop_serial)
 		if err != nil {
@@ -1635,21 +1539,17 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 		}
 	}
 	log.Println("update sensor complete: ", affectedCount)
-
 	return &pb.UpdateSensorResponse{}, nil
 }
 
 func (s *server) DeleteSensor(ctx context.Context, in *pb.DeleteSensorRequest) (*pb.DeleteSensorResponse, error) {
 	DeleteMainList(s, ctx)
-
 	log.Printf("Received DeleteSensor: %s", in.GetSensorUuid())
-
 	query := fmt.Sprintf(`
 		DELETE FROM sensor
 		WHERE uuid = '%s'
 		`,
 		in.GetSensorUuid())
-
 	sqlDeleteSensor, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1662,13 +1562,11 @@ func (s *server) DeleteSensor(ctx context.Context, in *pb.DeleteSensorRequest) (
 		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		return nil, err
 	}
-
 	query = fmt.Sprintf(`
 		DELETE FROM threshold
 		WHERE sensor_uuid = '%s'
 		`,
 		in.GetSensorUuid())
-
 	sqlDeleteThreshold, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1698,9 +1596,7 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 	var registered_time string
 	var ip_module_mac string
 	var name sql.NullString
-
 	var thresholds []*pb.Threshold
-
 	query := fmt.Sprintf(`
 		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
 			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
@@ -1710,7 +1606,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		WHERE sensor_uuid = '%s'
 		`,
 		in.GetSensorUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1718,7 +1613,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		var tempWarning1, tempDanger1 string
 		var tempWarning2, tempDanger2 string
@@ -1729,7 +1623,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		var tempWarning7, tempDanger7 string
 		var tempWarning8, tempDanger8 string
 		var tempWarning9, tempDanger9 string
-
 		if err := rows.Scan(
 			&tempWarning1, &tempDanger1,
 			&tempWarning2, &tempDanger2,
@@ -1745,7 +1638,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 			return nil, err
 		}
-
 		threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
 		thresholds = append(thresholds, threshold1)
 		threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
@@ -1764,7 +1656,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		thresholds = append(thresholds, threshold8)
 		threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
 		thresholds = append(thresholds, threshold9)
-
 	}
 	query = fmt.Sprintf(`
 		SELECT uuid, settop_uuid, status, serial, ip_address, location, registered_time,mac, name 
@@ -1772,16 +1663,13 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		WHERE uuid = '%s'
 		`,
 		in.GetSensorUuid())
-
 	rows, err = db.Query(query)
-
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &registered_time, &ip_module_mac, &name)
 		if err != nil {
@@ -1789,7 +1677,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 			return nil, err
 		}
-
 		sensor := &pb.Sensor{}
 		sensor.Uuid = uuid
 		sensor.SettopUuid = settop_uuid
@@ -1809,7 +1696,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		FROM settop 
 		WHERE uuid = '%s'
 		`, response.Sensor.GetSettopUuid())
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1817,7 +1703,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&settop_serial)
 		if err != nil {
@@ -1825,14 +1710,12 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 		}
 	}
 	response.SettopSerial = settop_serial
-
 	return response, nil
 }
 
 func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListRequest) (*pb.ReadSensorListResponse, error) {
 	log.Printf("Received GetSensorList: success")
 	response := &pb.ReadSensorListResponse{}
-
 	var uuid string
 	var settop_uuid string
 	var status_ uint64
@@ -1842,7 +1725,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 	var registered_time string
 	var ip_module_mac string
 	var name sql.NullString
-
 	query := fmt.Sprintf(`
 		SELECT uuid, settop_uuid, status, serial, ip_address, location, registered_time, mac, name 
 		FROM sensor 
@@ -1857,16 +1739,13 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 	}
 	defer rows.Close()
 	var thresholds []*pb.Threshold
-
 	for rows.Next() {
-
 		err := rows.Scan(&uuid, &settop_uuid, &status_, &serial, &ip_address, &location, &registered_time, &ip_module_mac, &name)
 		if err != nil {
 			log.Println(err)
 			err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 			return nil, err
 		}
-
 		query := fmt.Sprintf(`
 		SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
 			   temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
@@ -1876,7 +1755,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 		WHERE sensor_uuid = '%s'
 		`,
 			uuid)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -1884,7 +1762,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 			return nil, err
 		}
 		defer rows.Close()
-
 		for rows.Next() {
 			var tempWarning1, tempDanger1 string
 			var tempWarning2, tempDanger2 string
@@ -1895,7 +1772,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 			var tempWarning7, tempDanger7 string
 			var tempWarning8, tempDanger8 string
 			var tempWarning9, tempDanger9 string
-
 			if err := rows.Scan(
 				&tempWarning1, &tempDanger1,
 				&tempWarning2, &tempDanger2,
@@ -1911,7 +1787,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 				return nil, err
 			}
-
 			threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
 			thresholds = append(thresholds, threshold1)
 			threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
@@ -1931,7 +1806,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 			threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
 			thresholds = append(thresholds, threshold9)
 		}
-
 		sensorList := &pb.Sensor{}
 		sensorList.Uuid = uuid
 		sensorList.SettopUuid = settop_uuid
@@ -1951,11 +1825,9 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequest) (*pb.ReadHistoryListResponse, error) {
 	log.Printf("Received GetHistoryList: called")
 	response := &pb.ReadHistoryListResponse{}
-
 	var min_temp float32
 	var max_temp float32
 	var date string
-
 	query := ""
 	trim_interval := 1
 	if in.GetInterval() < 10 {
@@ -1999,12 +1871,10 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 			LIMIT %d, %d
 		`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), trim_interval, in.GetCursor(), in.GetCount())
 	}
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 		return nil, err
 	}
 	defer rows.Close()
@@ -2014,13 +1884,10 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Failed to scan history list row: %v", err)
 		}
-
-		// log.Println("1 = ", min_temp, max_temp, date)
 		historyList := &pb.History{}
 		historyList.MinTemp = min_temp
 		historyList.MaxTemp = max_temp
 		historyList.Date = date
-
 		response.HistoryList = append(response.HistoryList, historyList)
 	}
 	return response, nil
@@ -2031,14 +1898,12 @@ func (s *server) CreateGroup(ctx context.Context, in *pb.CreateGroupRequest) (*p
 		in.Group.GetUuid(), in.Group.GetName())
 	var uuid = uuid.New()
 	response := &pb.CreateGroupResponse{}
-
 	query := fmt.Sprintf(`
 		INSERT INTO group_ SET
 			uuid = '%s', 
 			name = '%s'
 		`,
 		uuid.String(), in.Group.GetName())
-
 	sqlAddRegisterer, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -2047,7 +1912,6 @@ func (s *server) CreateGroup(ctx context.Context, in *pb.CreateGroupRequest) (*p
 	}
 	response.Uuid = uuid.String()
 	defer sqlAddRegisterer.Close()
-
 	return response, nil
 }
 
@@ -2059,7 +1923,6 @@ func (s *server) UpdateGroup(ctx context.Context, in *pb.UpdateGroupRequest) (*p
 		WHERE uuid = '%s'
 		`,
 		in.Group.GetName(), in.Group.GetUuid())
-
 	sqlUpdateRegisterer, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -2072,21 +1935,17 @@ func (s *server) UpdateGroup(ctx context.Context, in *pb.UpdateGroupRequest) (*p
 		return nil, err
 	}
 	log.Println("update group complete: ", affectedCount)
-
 	return &pb.UpdateGroupResponse{}, nil
 }
 
 func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*pb.DeleteGroupResponse, error) {
 	log.Printf("Received DeleteGroup")
-
 	var group_name string
-
 	query := fmt.Sprintf(`
 	SELECT name 
 	FROM group_ 
 	WHERE uuid = '%s'
 	`, in.GetGroupUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -2104,13 +1963,11 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: Default groups cannot be deleted.")
 		return nil, err
 	}
-
 	query = fmt.Sprintf(`
 		DELETE FROM group_
 		WHERE uuid = '%s'
 		`,
 		in.GetGroupUuid())
-
 	sqlDeleteRegisterer, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -2123,20 +1980,17 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 		return nil, err
 	}
 	fmt.Println("delete count : ", nRow)
-
 	query = fmt.Sprintf(`
 		DELETE FROM group_gateway 
 		WHERE group_uuid = '%s'
 		`,
 		in.GetGroupUuid())
-
 	sqlDeleteRegisterer, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		return nil, err
 	}
-
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
@@ -2156,17 +2010,14 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	var firebase_token string
 	query = fmt.Sprintf(`
-	SELECT token 
-	FROM firebase_token 
-	WHERE email = '%s' AND group_uuid = '%s' 
+		SELECT token 
+		FROM firebase_token 
+		WHERE email = '%s' AND group_uuid = '%s' 
 	`, claims.Email, in.GetGroupUuid())
-
 	rows, err = db.Query(query)
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -2176,7 +2027,6 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 			log.Println(err)
 			return nil, err
 		}
-
 		requestData := make(map[string]string)
 		requestData["token"] = firebase_token
 		tokens := []string{requestData["token"]}
@@ -2185,11 +2035,10 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 			return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 		}
 		query = fmt.Sprintf(`
-	DELETE FROM firebase_token 
-	WHERE email = '%s' AND group_uuid = '%s' 
-	`,
+			DELETE FROM firebase_token 
+			WHERE email = '%s' AND group_uuid = '%s' 
+			`,
 			claims.Email, in.GetGroupUuid())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -2198,81 +2047,67 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 		}
 		defer sqlAddRegisterer.Close()
 	}
-
 	return &pb.DeleteGroupResponse{}, nil
 }
 
 func (s *server) ReadGroup(ctx context.Context, in *pb.ReadGroupRequest) (*pb.ReadGroupResponse, error) {
 	log.Printf("Received GetGroup")
 	response := &pb.ReadGroupResponse{}
-
 	var uuid string
 	var name string
-
 	query := fmt.Sprintf(`
 		SELECT uuid, name 
 		FROM group_ 
 		WHERE uuid = '%s'
 		`,
 		in.GetGroupUuid())
-
 	rows, err := db.Query(query)
-
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&uuid, &name)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
-
 		group := &pb.Group{}
 		group.Uuid = uuid
 		group.Name = name
 		response.Group = group
 	}
-
 	return response, nil
 }
 
 func (s *server) ReadGroupList(ctx context.Context, in *pb.ReadGroupListRequest) (*pb.ReadGroupListResponse, error) {
 	log.Printf("Received GetGroupList: success")
 	response := &pb.ReadGroupListResponse{}
-
 	var uuid string
 	var name string
-
 	query := fmt.Sprintf(`
 		SELECT uuid, name 
 		FROM group_ 
 		`)
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&uuid, &name)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
-
 		if name == "master" {
 			continue
 		}
 		groupList := &pb.Group{}
 		groupList.Uuid = uuid
 		groupList.Name = name
-
 		response.GroupList = append(response.GroupList, groupList)
 	}
 	return response, nil
@@ -2283,7 +2118,6 @@ func (s *server) CreatePermission(ctx context.Context, in *pb.CreatePermissionRe
 		in.Permission.GetUuid(), in.Permission.GetName())
 	var uuid = uuid.New()
 	response := &pb.CreatePermissionResponse{}
-
 	query := fmt.Sprintf(`
 		INSERT INTO permission SET
 			uuid = '%s', 
@@ -2298,18 +2132,14 @@ func (s *server) CreatePermission(ctx context.Context, in *pb.CreatePermissionRe
 		`,
 		uuid.String(), in.Permission.GetName(), boolToInt(in.Permission.GetUser()), boolToInt(in.Permission.GetPermission()), boolToInt(in.Permission.GetSettopCreate()),
 		boolToInt(in.Permission.GetSensorInfo()), boolToInt(in.Permission.GetIpModule()), boolToInt(in.Permission.GetThreshold()), boolToInt(in.Permission.GetSensorHistory()))
-
 	sqlAddPermission, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 		return nil, err
 	}
 	defer sqlAddPermission.Close()
-
 	response.Uuid = uuid.String()
-
 	return response, nil
 }
 
@@ -2319,7 +2149,6 @@ func (s *server) UpdatePermission(ctx context.Context, in *pb.UpdatePermissionRe
 		log.Println("err permission")
 		return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 	}
-
 	query1 := `
 		SELECT uuid, name
 		FROM permission
@@ -2332,12 +2161,10 @@ func (s *server) UpdatePermission(ctx context.Context, in *pb.UpdatePermissionRe
 		return nil, err
 	}
 	defer rows1.Close()
-
 	var default_uuid string
 	for rows1.Next() {
 		var uuid string
 		var name string
-
 		err := rows1.Scan(&uuid, &name)
 		if err != nil {
 			log.Println(err)
@@ -2347,13 +2174,11 @@ func (s *server) UpdatePermission(ctx context.Context, in *pb.UpdatePermissionRe
 			default_uuid = uuid
 		}
 	}
-
 	if in.Permission.GetUuid() == default_uuid {
 		if in.Permission.GetName() != "default" {
 			return nil, status.Errorf(codes.InvalidArgument, "Bad Request : default")
 		}
 	}
-
 	log.Printf("Received UpdatePermission: %s", in.Permission.GetUuid())
 	query := fmt.Sprintf(`
 		UPDATE permission SET
@@ -2369,7 +2194,6 @@ func (s *server) UpdatePermission(ctx context.Context, in *pb.UpdatePermissionRe
 		`,
 		in.Permission.GetName(), boolToInt(in.Permission.GetUser()), boolToInt(in.Permission.GetPermission()), boolToInt(in.Permission.GetSettopCreate()),
 		boolToInt(in.Permission.GetSensorInfo()), boolToInt(in.Permission.GetIpModule()), boolToInt(in.Permission.GetThreshold()), boolToInt(in.Permission.GetSensorHistory()), in.Permission.GetUuid())
-
 	sqlUpdatePermission, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -2383,13 +2207,11 @@ func (s *server) UpdatePermission(ctx context.Context, in *pb.UpdatePermissionRe
 		return nil, err
 	}
 	log.Println("update permission complete: ", affectedCount)
-
 	return &pb.UpdatePermissionResponse{}, nil
 }
 
 func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRequest) (*pb.DeletePermissionResponse, error) {
 	log.Printf("Received DeletePermission: %s", in.GetPermissionUuid())
-
 	query1 := `
 		SELECT uuid, name
 		FROM permission
@@ -2398,16 +2220,13 @@ func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRe
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 		return nil, err
 	}
 	defer rows1.Close()
-
 	var default_uuid string
 	for rows1.Next() {
 		var uuid string
 		var name string
-
 		err := rows1.Scan(&uuid, &name)
 		if err != nil {
 			log.Println(err)
@@ -2417,7 +2236,6 @@ func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRe
 			default_uuid = uuid
 		}
 	}
-
 	if in.GetPermissionUuid() == default_uuid {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request : default")
 	}
@@ -2426,15 +2244,12 @@ func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRe
 		WHERE uuid = '%s'
 		`,
 		in.GetPermissionUuid())
-
 	sqlDeletePermission, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 		return nil, err
 	}
-
 	nRow, err := sqlDeletePermission.RowsAffected()
 	if err != nil {
 		log.Println(err)
@@ -2447,21 +2262,17 @@ func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRe
 func (s *server) ReadPermissionList(ctx context.Context, in *pb.ReadPermissionListRequest) (*pb.ReadPermissionListResponse, error) {
 	log.Printf("Received GetPermissionList: success")
 	response := &pb.ReadPermissionListResponse{}
-
 	query := `
 		SELECT uuid, name, user, permission, settop_create, sensor_info, ip_module, threshold, sensor_history  
 		FROM permission
 	`
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		var uuid string
 		var name string
@@ -2472,7 +2283,6 @@ func (s *server) ReadPermissionList(ctx context.Context, in *pb.ReadPermissionLi
 		var ip_module uint64
 		var threshold uint64
 		var sensor_history uint64
-
 		err := rows.Scan(&uuid, &name, &user, &permission, &settop_create, &sensor_info, &ip_module, &threshold, &sensor_history)
 		if err != nil {
 			log.Println(err)
@@ -2492,41 +2302,22 @@ func (s *server) ReadPermissionList(ctx context.Context, in *pb.ReadPermissionLi
 			Threshold:     intToBool(threshold),
 			SensorHistory: intToBool(sensor_history),
 		}
-
 		response.PermissionList = append(response.PermissionList, permissionList)
 	}
-
 	return response, nil
 }
 
 func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.FindEmailResponse, error) {
 	log.Printf("Find Email")
-
 	response := &pb.FindEmailResponse{}
 	var auth_email string
 	var phone_number_aes256 []byte
 	var query string
-	// if in.GetCompanyName() == "" && in.GetCompanyNumber() == "" {
-	// 	query = fmt.Sprintf(`
-	// 	SELECT auth_email
-	// 	FROM registerer
-	// 	WHERE name = '%s'
-	// 	`, in.GetName())
-	// } else {
-	// 	query = fmt.Sprintf(`
-	// 	SELECT auth_email
-	// 	FROM registerer
-	// 	WHERE name = '%s' AND company_name = '%s' AND company_number = '%s'
-	// 	`,
-	// 		in.GetName(), in.GetCompanyName(), in.GetCompanyNumber())
-	// }
-
 	query = fmt.Sprintf(`
 		SELECT email, phone_number
 		FROM user 
 		WHERE name = '%s'
 		`, in.GetName())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -2534,37 +2325,30 @@ func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.Fi
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&auth_email, &phone_number_aes256)
 		if err != nil {
 			log.Println(err)
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 			return nil, err
 		}
 		phone_number_aes256, err = base64.StdEncoding.DecodeString(string(phone_number_aes256))
 		if err != nil {
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-
 			return nil, err
 		}
 		phone_number_aes256, err = AES256GSMDecrypt(aesSecretKey, phone_number_aes256)
 		if err != nil {
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
-
 		}
 		phone_number := string(phone_number_aes256)
-
 		if phone_number == in.GetPhoneNumber() {
 			response.Email = auth_email
 		} else {
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
 		}
-		log.Println("phone_number_aes256 = ", phone_number_aes256)
-
 	}
 	if response.Email == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
@@ -2580,37 +2364,24 @@ func (s *server) MainList(ctx context.Context, in *pb.MainListRequest) (*pb.Main
 	} else {
 		fmt.Println("MainListResponse not found.")
 		response := &pb.MainListResponse{}
-
-		// Place List
 		placeResponse, err := s.ReadPlaceList(ctx, &pb.ReadPlaceListRequest{})
 		if err != nil {
 			log.Println(err)
-			// You can customize the error response and status code based on your application's requirements.
 			return nil, status.Errorf(codes.Internal, "Failed to retrieve place list: %v", err)
 		}
-
 		var settopList []*pb.Settop
 		var sensorList []*pb.Sensor
-
-		// Iterate through each place to get settops and sensors
-
-		// Settop List for the current place
 		settopResponse, err := s.ReadSettopList(ctx, &pb.ReadSettopListRequest{})
 		if err != nil {
 			log.Println(err)
-			// You can customize the error response and status code based on your application's requirements.
 			return nil, status.Errorf(codes.Internal, "Failed to retrieve settop list: %v", err)
 		}
-
-		// Iterate through each settop to get sensors
 		for _, settop := range settopResponse.SettopList {
-			// Sensor List for the current settop
 			sensorResponse, err := s.ReadSensorList(ctx, &pb.ReadSensorListRequest{
 				SettopUuid: settop.GetUuid(),
 			})
 			if err != nil {
 				log.Println(err)
-				// You can customize the error response and status code based on your application's requirements.
 				return nil, status.Errorf(codes.Internal, "Failed to retrieve sensor list: %v", err)
 			}
 			settop_ := &pb.Settop{}
@@ -2625,23 +2396,18 @@ func (s *server) MainList(ctx context.Context, in *pb.MainListRequest) (*pb.Main
 			settop_.FwVersion = settop.GetFwVersion()
 			settop_.RegisteredTime = settop.GetRegisteredTime()
 			settopList = append(settopList, settop_)
-
-			// Add sensors to the list
 			sensorList = append(sensorList, sensorResponse.GetSensorList()...)
 		}
-
 		response.PlaceList = placeResponse.GetPlaceList()
 		response.SettopList = settopList
 		response.SensorList = sensorList
 		mainListMapping.AddMapping(in.GetRegistererUuid(), response)
 		return response, nil
 	}
-
 }
 
 func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.ImageChunk, error) {
 	response := &pb.ImageChunk{}
-
 	sensorSerial := req.SensorSerial
 	date := req.Date
 	requestTime, err := time.Parse("2006-01-02 15:04:05", date)
@@ -2659,7 +2425,6 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
 	defer imageFile.Close()
-
 	buffer := make([]byte, 1024*8)
 	for {
 		n, err := imageFile.Read(buffer)
@@ -2671,13 +2436,6 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 			return nil, err
 		}
 		encodedData = base64.StdEncoding.EncodeToString(buffer[:n])
-		// encodedBytes := []byte(encodedData)
-		// log.Println(encodedBytes)
-
-		// if err := stream.Send(&pb.ImageChunk{TempImage: encodedBytes}); err != nil {
-		// 	log.Fatalf("Error sending image chunk: %v", err)
-		// 	return err
-		// }
 	}
 	response.TempImage = encodedData
 	return response, nil
@@ -2704,13 +2462,11 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	response := &pb.SubscribeFirebaseResponse{}
 	requestData := make(map[string]string)
 	requestData["token"] = in.GetToken()
 	tokens := []string{requestData["token"]}
 	var topics []string
-
 	var group_master_uuid string
 	if claims.Admin {
 		query := fmt.Sprintf(`
@@ -2718,7 +2474,6 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 			FROM group_ 
 			WHERE name = 'master'
 		`)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -2740,23 +2495,20 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 	for _, topic := range topics {
 		err = firebaseutil.SubscribeToTopic(tokens, topic, in.GetIsSubscribe())
 		query := fmt.Sprintf(`
-		SELECT COUNT(*) FROM firebase_token 
-		WHERE token = '%s' AND group_uuid = '%s' AND email = '%s'`,
+			SELECT COUNT(*) FROM firebase_token 
+			WHERE token = '%s' AND group_uuid = '%s' AND email = '%s'`,
 			in.GetToken(), topic, claims.Email)
-
 		var count int
 		err := db.QueryRow(query).Scan(&count)
 		if err != nil {
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		}
-
 		if count == 0 {
 			insertQuery := fmt.Sprintf(`
-		INSERT INTO firebase_token (token, group_uuid, email)
-		VALUES ('%s', '%s', '%s')`,
+				INSERT INTO firebase_token (token, group_uuid, email)
+				VALUES ('%s', '%s', '%s')`,
 				in.GetToken(), topic, claims.Email)
-
 			_, err := db.Exec(insertQuery)
 			if err != nil {
 				log.Println(err)
@@ -2764,18 +2516,15 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 			}
 		}
 	}
-
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
-
 	return response, nil
 }
 
 func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogListResponse, error) {
 	log.Printf("LogList called")
 	response := &pb.LogListResponse{}
-
 	mainListResponse, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
 	if ok {
 		fmt.Println("MainListResponse found")
@@ -2784,15 +2533,12 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 			RegistererUuid: in.GetRegistererUuid(),
 		})
 	}
-
 	query := ""
-
 	if len(in.GetSensorSerial()) <= 0 {
 		var sensorSerialClauses []string
 		for _, sensor := range mainListResponse.SensorList {
 			sensorSerialClauses = append(sensorSerialClauses, fmt.Sprintf("'%s'", sensor.Serial))
 		}
-
 		sensorSerialsCondition := strings.Join(sensorSerialClauses, ",")
 		if sensorSerialsCondition == "" {
 			return response, nil
@@ -2813,7 +2559,6 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 		LIMIT %d, %d 
 	`, in.GetSensorSerial(), in.GetCursor(), in.GetCount())
 	}
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -2821,7 +2566,6 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		var place string
 		var floor string
@@ -2842,7 +2586,6 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 			Type:           pb.TypeStatus(type_),
 			RegisteredTime: registered_time,
 		}
-
 		response.Log = append(response.Log, logEntry)
 	}
 	return response, nil
@@ -2859,21 +2602,18 @@ func (s *server) CreateRegistererGroup(ctx context.Context, in *pb.CreateRegiste
 		FROM group_gateway 
 		WHERE group_uuid = '%s'
 		`, in.GetGroupUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&registerer_uuid)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
-
 		if getNullStringValidValue(registerer_uuid) == "" {
 			continue
 		}
@@ -2885,13 +2625,11 @@ func (s *server) CreateRegistererGroup(ctx context.Context, in *pb.CreateRegiste
 			}
 		}
 	}
-
 	for _, registererUUID := range registererUUIDs {
 		query := fmt.Sprintf(`
             INSERT INTO group_gateway (group_uuid, registerer_uuid)
             VALUES ('%s', '%s')`,
 			groupUUID, registererUUID)
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -2899,22 +2637,18 @@ func (s *server) CreateRegistererGroup(ctx context.Context, in *pb.CreateRegiste
 			return nil, err
 		}
 		defer mainListMapping.RemoveMapping(registererUUID)
-
 		defer sqlAddRegisterer.Close()
 	}
-
 	return response, nil
 }
 
 func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegistererGroupRequest) (*pb.DeleteRegistererGroupResponse, error) {
 	log.Printf("Received DeleteRegistererGroup")
-
 	query := fmt.Sprintf(`
 		DELETE FROM group_gateway 
 		WHERE group_uuid = '%s' AND registerer_uuid = '%s' 
 		`,
 		in.GetGroupUuid(), in.GetRegistererUuid())
-
 	sqlDeleteRegisterer, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -2927,7 +2661,6 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 		return nil, err
 	}
 	fmt.Println("delete count : ", nRow)
-
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
@@ -2947,14 +2680,12 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	var firebase_token string
 	query = fmt.Sprintf(`
 	SELECT token 
 	FROM firebase_token 
 	WHERE email = '%s' AND group_uuid = '%s' 
 	`, claims.Email, in.GetGroupUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -2981,7 +2712,6 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 		WHERE email = '%s' AND group_uuid = '%s' 
 		`,
 			claims.Email, in.GetGroupUuid())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -2991,15 +2721,12 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 		defer sqlAddRegisterer.Close()
 	}
 	defer mainListMapping.RemoveMapping(in.GetGroupUuid())
-
 	var group_uuid string
-
 	query = fmt.Sprintf(`
 			SELECT group_uuid 
 			FROM group_gateway 
 			WHERE registerer_uuid = '%s'
 		`, in.GetRegistererUuid())
-
 	rows1, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -3013,16 +2740,13 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 			return nil, err
 		}
 	}
-
 	if len(group_uuid) == 0 {
 		var group_default_uuid string
-
 		query := fmt.Sprintf(`
 		SELECT uuid 
 		FROM group_ 
 		WHERE name = 'default'
 	`)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3036,12 +2760,10 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 				return nil, err
 			}
 		}
-
 		query = fmt.Sprintf(`
-		INSERT INTO group_gateway (group_uuid, registerer_uuid)
-		VALUES ('%s', '%s')`,
+			INSERT INTO group_gateway (group_uuid, registerer_uuid)
+			VALUES ('%s', '%s')`,
 			group_default_uuid, in.GetRegistererUuid())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3050,14 +2772,12 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 		}
 		defer sqlAddRegisterer.Close()
 	}
-
 	return &pb.DeleteRegistererGroupResponse{}, nil
 }
 
 func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegistererGroupListRequest) (*pb.ReadRegistererGroupListResponse, error) {
 	log.Printf("Received GetGroupList: success")
 	response := &pb.ReadRegistererGroupListResponse{}
-
 	var registerer_uuid sql.NullString
 	var uuid_ string
 	var auth_email string
@@ -3067,15 +2787,12 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 	var is_alarm uint64
 	var permission_uuid string
 	var name string
-
 	var group_name string
-
 	query := fmt.Sprintf(`
 	SELECT name 
 	FROM group_ 
 	WHERE uuid = '%s'
 	`, in.GetGroupUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -3090,20 +2807,17 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 		}
 	}
 	response.Name = group_name
-
 	query = fmt.Sprintf(`
 		SELECT registerer_uuid 
 		FROM group_gateway 
 		WHERE group_uuid = '%s'
 		`, in.GetGroupUuid())
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&registerer_uuid)
 		if err != nil {
@@ -3113,12 +2827,11 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 		if getNullStringValidValue(registerer_uuid) == "" {
 			continue
 		}
-
 		query = fmt.Sprintf(`
-		SELECT uuid, auth_email, company_name, company_number, status, is_alarm, permission_uuid, name  
-		FROM registerer 
-		WHERE uuid = '%s'
-		`,
+			SELECT uuid, auth_email, company_name, company_number, status, is_alarm, permission_uuid, name  
+			FROM registerer 
+			WHERE uuid = '%s'
+			`,
 			getNullStringValidValue(registerer_uuid))
 		registerer_rows, err := db.Query(query)
 		if err != nil {
@@ -3126,7 +2839,6 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 			return nil, status.Errorf(codes.Internal, "Failed to fetch registerer information: %v", err)
 		}
 		registererList := &pb.Registerer{}
-
 		for registerer_rows.Next() {
 			err := registerer_rows.Scan(&uuid_, &auth_email, &company_name, &company_number, &status_, &is_alarm, &permission_uuid, &name)
 			if err != nil {
@@ -3141,7 +2853,6 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 			registererList.IsAlarm = intToBool(is_alarm)
 			registererList.PermissionUuid = permission_uuid
 			registererList.Name = name
-
 		}
 		response.RegistererList = append(response.RegistererList, registererList)
 	}
@@ -3151,31 +2862,26 @@ func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegiste
 func (s *server) CreateSettopGroup(ctx context.Context, in *pb.CreateSettopGroupRequest) (*pb.CreateSettopGroupResponse, error) {
 	log.Printf("Received CreateSettopGroup")
 	response := &pb.CreateSettopGroupResponse{}
-
 	settopUUID := in.GetSettopUuid()
 	groupUUIDs := in.GetGroupUuid()
-
 	var group_uuid string
 	query := fmt.Sprintf(`
 		SELECT group_uuid 
 		FROM group_gateway 
 		WHERE settop_uuid = '%s'
 		`, in.GetSettopUuid())
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&group_uuid)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
-
 		for _, groupUUID := range groupUUIDs {
 			if groupUUID == group_uuid {
 				log.Println(err)
@@ -3184,7 +2890,6 @@ func (s *server) CreateSettopGroup(ctx context.Context, in *pb.CreateSettopGroup
 			}
 		}
 	}
-
 	for _, groupUUID := range groupUUIDs {
 		query := fmt.Sprintf(`
             INSERT INTO group_gateway (settop_uuid, group_uuid)
@@ -3204,7 +2909,6 @@ func (s *server) CreateSettopGroup(ctx context.Context, in *pb.CreateSettopGroup
 
 func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroupRequest) (*pb.DeleteSettopGroupResponse, error) {
 	log.Printf("Received DeleteRegistererGroup")
-
 	query := fmt.Sprintf(`
 		DELETE FROM group_gateway 
 		WHERE group_uuid = '%s' AND settop_uuid = '%s' 
@@ -3223,15 +2927,12 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 		return nil, err
 	}
 	fmt.Println("delete count : ", nRow)
-
 	var group_uuid string
-
 	query = fmt.Sprintf(`
 			SELECT group_uuid 
 			FROM group_gateway 
 			WHERE settop_uuid = '%s'
 		`, in.GetSettopUuid())
-
 	rows1, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -3245,16 +2946,13 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 			return nil, err
 		}
 	}
-
 	if len(group_uuid) == 0 {
 		var group_default_uuid string
-
 		query := fmt.Sprintf(`
 		SELECT uuid 
 		FROM group_ 
 		WHERE name = 'default'
 	`)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3268,12 +2966,10 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 				return nil, err
 			}
 		}
-
 		query = fmt.Sprintf(`
-		INSERT INTO group_gateway (group_uuid, settop_uuid)
-		VALUES ('%s', '%s')`,
+			INSERT INTO group_gateway (group_uuid, settop_uuid)
+			VALUES ('%s', '%s')`,
 			group_default_uuid, in.GetSettopUuid())
-
 		sqlAddRegisterer, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3282,23 +2978,18 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 		}
 		defer sqlAddRegisterer.Close()
 	}
-
 	return &pb.DeleteSettopGroupResponse{}, nil
 }
 
 func (s *server) ReadSettopGroupList(ctx context.Context, in *pb.ReadSettopGroupListRequest) (*pb.ReadSettopGroupListResponse, error) {
 	log.Printf("Received GetSettopGroupList: success")
 	response := &pb.ReadSettopGroupListResponse{}
-
 	var group_uuid string
-
 	var uuid_ string
 	var name string
-
 	var place_uuid string
 	var serial string
 	var address string
-
 	query := fmt.Sprintf(`
 		SELECT place_uuid, serial
 		FROM settop 
@@ -3320,7 +3011,6 @@ func (s *server) ReadSettopGroupList(ctx context.Context, in *pb.ReadSettopGroup
 			return nil, err
 		}
 	}
-
 	query = fmt.Sprintf(`
 		SELECT address 
 		FROM place 
@@ -3349,14 +3039,12 @@ func (s *server) ReadSettopGroupList(ctx context.Context, in *pb.ReadSettopGroup
 		FROM group_gateway 
 		WHERE settop_uuid = '%s'
 		`, in.GetSettopUuid())
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&group_uuid)
 		if err != nil {
@@ -3364,10 +3052,10 @@ func (s *server) ReadSettopGroupList(ctx context.Context, in *pb.ReadSettopGroup
 			return nil, err
 		}
 		query = fmt.Sprintf(`
-		SELECT uuid, name  
-		FROM group_ 
-		WHERE uuid = '%s'
-		`,
+			SELECT uuid, name  
+			FROM group_ 
+			WHERE uuid = '%s'
+			`,
 			group_uuid)
 		registerer_rows, err := db.Query(query)
 		if err != nil {
@@ -3415,11 +3103,9 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	response := &pb.MainGroupListResponse{
 		Groups: make(map[string]*pb.MainGroup),
 	}
-
 	var registerer_uuid sql.NullString
 	var uuid_ string
 	var auth_email string
@@ -3429,22 +3115,18 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 	var is_alarm uint64
 	var permission_uuid string
 	var name string
-
 	var group_name string
 	var group_uuid string
-
 	query := fmt.Sprintf(`
 		SELECT uuid, name 
 		FROM group_ 
 		`)
-
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 		return nil, err
 	}
 	defer rows.Close()
-
 	for rows.Next() {
 		err := rows.Scan(&group_uuid, &group_name)
 		if err != nil {
@@ -3459,7 +3141,6 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 			FROM group_gateway 
 			WHERE group_uuid = '%s'
 		`, group_uuid)
-
 		rows1, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3474,11 +3155,9 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 				log.Println(err)
 				return nil, err
 			}
-
 			if getNullStringValidValue(registerer_uuid) == "" {
 				continue
 			}
-
 			query = fmt.Sprintf(`
 				SELECT uuid, auth_email, company_name, company_number, status, is_alarm, permission_uuid, name  
 				FROM registerer 
@@ -3491,7 +3170,6 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 				return nil, status.Errorf(codes.Internal, "Failed to fetch registerer information: %v", err)
 			}
 			registererList := &pb.Registerer{}
-
 			for registerer_rows.Next() {
 				err := registerer_rows.Scan(&uuid_, &auth_email, &company_name, &company_number, &status_, &is_alarm, &permission_uuid, &name)
 				if err != nil {
@@ -3506,13 +3184,10 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 				registererList.IsAlarm = intToBool(is_alarm)
 				registererList.PermissionUuid = permission_uuid
 				registererList.Name = name
-
 			}
-
 			mainGroup.RegistererList = append(mainGroup.RegistererList, registererList)
 		}
 		response.Groups[group_uuid] = mainGroup
-
 	}
 	return response, nil
 }
@@ -3527,7 +3202,6 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 	var group_settop_uuid sql.NullString
 	var uuid_ string
 	var name string
-
 	var place_uuid string
 	var serial string
 	var address string
@@ -3544,19 +3218,17 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 	}
 	token := authHeaders[0]
 	claims := &Claims{}
-
 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(string(Conf.Jwt.SecretKeyAT)), nil
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-
 	if claims.Admin {
 		query := fmt.Sprintf(`
-		SELECT uuid, place_uuid, serial
-		FROM settop 
-		`)
+			SELECT uuid, place_uuid, serial
+			FROM settop 
+			`)
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -3571,12 +3243,11 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 				err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 				return nil, err
 			}
-
 			query = fmt.Sprintf(`
-		SELECT address 
-		FROM place 
-		WHERE uuid = '%s'
-		`,
+				SELECT address 
+				FROM place 
+				WHERE uuid = '%s'
+				`,
 				place_uuid)
 			rows1, err := db.Query(query)
 			if err != nil {
@@ -3598,10 +3269,10 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 			mainSettop.Address = address
 			address = ""
 			query = fmt.Sprintf(`
-			SELECT group_uuid 
-			FROM group_gateway 
-			WHERE settop_uuid = '%s'
-		`, settop_uuid)
+				SELECT group_uuid 
+				FROM group_gateway 
+				WHERE settop_uuid = '%s'
+			`, settop_uuid)
 
 			rows2, err := db.Query(query)
 			if err != nil {
@@ -3617,10 +3288,10 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 					return nil, err
 				}
 				query = fmt.Sprintf(`
-				SELECT uuid, name  
-				FROM group_ 
-				WHERE uuid = '%s'
-				`,
+					SELECT uuid, name  
+					FROM group_ 
+					WHERE uuid = '%s'
+					`,
 					getNullStringValidValue(group_uuid))
 				registerer_rows, err := db.Query(query)
 				if err != nil {
@@ -3645,14 +3316,12 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 		readRegistererResponse, _ := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
 			Name: "check",
 		})
-
 		for _, group_uuid_ := range readRegistererResponse.GetRegistererInfo().GetGroupUuid() {
 			query := fmt.Sprintf(`
-			SELECT settop_uuid  
-			FROM group_gateway 
-			WHERE group_uuid = '%s'
-			`, group_uuid_)
-
+				SELECT settop_uuid  
+				FROM group_gateway 
+				WHERE group_uuid = '%s'
+				`, group_uuid_)
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -3667,12 +3336,11 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 					err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 					return nil, err
 				}
-
 				query := fmt.Sprintf(`
-			SELECT uuid, place_uuid, serial
-			FROM settop 
-			WHERE uuid = '%s' 
-			`, getNullStringValidValue(group_settop_uuid))
+					SELECT uuid, place_uuid, serial
+					FROM settop 
+					WHERE uuid = '%s' 
+					`, getNullStringValidValue(group_settop_uuid))
 				rows, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
@@ -3687,12 +3355,11 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 						err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 						return nil, err
 					}
-
 					query = fmt.Sprintf(`
-			SELECT address 
-			FROM place 
-			WHERE uuid = '%s'
-			`,
+						SELECT address 
+						FROM place 
+						WHERE uuid = '%s'
+						`,
 						place_uuid)
 					rows1, err := db.Query(query)
 					if err != nil {
@@ -3714,18 +3381,16 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 					mainSettop.Address = address
 					address = ""
 					query = fmt.Sprintf(`
-				SELECT group_uuid 
-				FROM group_gateway 
-				WHERE settop_uuid = '%s'
-			`, settop_uuid)
-
+						SELECT group_uuid 
+						FROM group_gateway 
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
 					rows2, err := db.Query(query)
 					if err != nil {
 						log.Println(err)
 						return nil, err
 					}
 					defer rows2.Close()
-
 					for rows2.Next() {
 						err := rows2.Scan(&group_uuid)
 						if err != nil {
@@ -3733,10 +3398,10 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 							return nil, err
 						}
 						query = fmt.Sprintf(`
-					SELECT uuid, name  
-					FROM group_ 
-					WHERE uuid = '%s'
-					`,
+							SELECT uuid, name  
+							FROM group_ 
+							WHERE uuid = '%s'
+							`,
 							getNullStringValidValue(group_uuid))
 						registerer_rows, err := db.Query(query)
 						if err != nil {
@@ -3759,33 +3424,27 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 				}
 			}
 		}
-
 	}
-
 	return response, nil
 }
 
 func (s *server) ReadFirebaseTopicList(ctx context.Context, in *pb.ReadFirebaseTopicListRequest) (*pb.ReadFirebaseTopicListResponse, error) {
 	log.Printf("Received ReadFirebaseTopicListResponse")
 	response := &pb.ReadFirebaseTopicListResponse{}
-
 	registererinfo, err := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
 		Name: "check",
 	})
 	if err != nil {
 		log.Println(err)
 	}
-
 	var group_uuid string
 	var uuid string
 	var name string
-
 	query := fmt.Sprintf(`
-			SELECT group_uuid 
-			FROM group_gateway 
-			WHERE registerer_uuid = '%s'
-		`, registererinfo.GetRegistererInfo().GetUuid())
-
+		SELECT group_uuid 
+		FROM group_gateway 
+		WHERE registerer_uuid = '%s'
+	`, registererinfo.GetRegistererInfo().GetUuid())
 	rows1, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -3798,34 +3457,28 @@ func (s *server) ReadFirebaseTopicList(ctx context.Context, in *pb.ReadFirebaseT
 			log.Println(err)
 			return nil, err
 		}
-
 		query = fmt.Sprintf(`
-		SELECT uuid, name 
-		FROM group_ 
-		WHERE uuid = '%s'
-		`, group_uuid)
-
+			SELECT uuid, name 
+			FROM group_ 
+			WHERE uuid = '%s'
+			`, group_uuid)
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 			return nil, err
 		}
 		defer rows.Close()
-
 		for rows.Next() {
 			err := rows.Scan(&uuid, &name)
 			if err != nil {
 				log.Println(err)
 				return nil, err
 			}
-
 			groupList := &pb.Group{}
 			groupList.Uuid = uuid
 			groupList.Name = name
-
 			response.GroupList = append(response.GroupList, groupList)
 		}
 	}
-
 	return response, nil
 }

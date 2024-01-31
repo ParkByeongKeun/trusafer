@@ -48,7 +48,6 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	_ "github.com/go-sql-driver/mysql"
-	// "github.com/h2non/bimg"
 )
 
 var db *sql.DB
@@ -188,7 +187,6 @@ func main() {
 	defer lbj.Close()
 	logger = utils.NewLogger(lbj)
 	logger.Title.Printf("Start Server")
-
 	dbID := Conf.Database.Id
 	dbPW := Conf.Database.Password
 	dbAddr := Conf.Database.Address
@@ -199,10 +197,8 @@ func main() {
 	saveImageDir = Conf.Etc.SaveImageDir
 	gwPort := Conf.Gw.Port
 	imPort := Conf.Im.Port
-	// secret_key_rt := Conf.Jwt.SecretKeyRTrf crtuy
 	secret_key_at := Conf.Jwt.SecretKeyAT
 	token_duration_at := Conf.Jwt.TokenDurationAT
-	// token_duration_rt := Conf.Jwt.TokenDurationRT
 
 	hash := sha256.New()
 	_, err = hash.Write([]byte(Conf.Encryption.Passphrase))
@@ -219,9 +215,7 @@ func main() {
 	// password := "9DGQhyCH6RZ4"
 	base_topic = "trusafer"
 	opts1 := mqtt.NewClientOptions().AddBroker(broker)
-
 	tlsconfig := NewTLSConfig()
-
 	opts1.SetClientID(mqtt_serial).SetTLSConfig(tlsconfig)
 	opts1.SetUsername(username)
 	opts1.SetPassword(password)
@@ -232,7 +226,6 @@ func main() {
 	opts1.SetReconnectingHandler(func(c mqtt.Client, options *mqtt.ClientOptions) {
 		println("mqtt reconnecting...")
 	})
-
 	opts1.SetOnConnectHandler(func(c mqtt.Client) {
 		println("mqtt connected!")
 		var wg sync.WaitGroup
@@ -243,17 +236,13 @@ func main() {
 				subscribeHandler(client, topic)
 			}()
 		}
-
 		startSubscriber(client, base_topic+"/get/settop_sn/#")
 		startSubscriber(client, base_topic+"/regist/sensor/#")
 		startSubscriber(client, base_topic+"/deregist/sensor/#")
-		// wg.Add(1)
-		// go subscribeHandler(client, base_topic+"/data/threshold9/#")
 		startSubscriber(client, base_topic+"/data/frame/#")
 		startSubscriber(client, base_topic+"/data/connection/#")
 		startSubscriber(client, base_topic+"/data/status/#")
 		startSubscriber(client, base_topic+"/data/info/#")
-
 		wg.Wait()
 	})
 	//file_ delete
@@ -264,7 +253,6 @@ func main() {
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		log.Fatal(token.Error())
 	}
-
 	dataSource := fmt.Sprintf("%s:%s@tcp(%s)/%s", dbID, dbPW, dbAddr, dbName)
 	db, err = sql.Open("mysql", dataSource)
 	if err != nil {
@@ -280,9 +268,7 @@ func main() {
 		return
 	}
 	log.Printf("Connected to DB [%s/%s] successfully\n", dbAddr, dbName)
-
 	createDBTablesIfNotExist()
-
 	certFile := grpcCert
 	keyFile := grpcKey
 	creds, sslErr := credentials.NewServerTLSFromFile(certFile, keyFile)
@@ -290,33 +276,23 @@ func main() {
 		log.Fatalf("Failed loading certificates: %v", sslErr)
 		return
 	}
-
 	opts := []grpc.ServerOption{}
 	jwtManagerAT := service.NewJWTManager(secret_key_at, token_duration_at)
 	interceptorAT := service.NewAuthInterceptor(jwtManagerAT, accessibleRolesForRT())
 	opts = append(opts, grpc.Creds(creds))
 	opts = append(opts, grpc.UnaryInterceptor(interceptorAT.Unary()))
-
 	grpcServer := grpc.NewServer()
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-
 	pb.RegisterMainControlServer(grpcServer, &server{})
-
 	go func() {
 		log.Printf("Serving gRPC server on %d port", grpcPort)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("failed to serve: %s", err)
 		}
 	}()
-
-	// creds2, sslErr := credentials.NewClientTLSFromFile(certFile, "127.0.0.1")
-	// if sslErr != nil {
-	// 	log.Fatalf("Failed loading certificates: %v", sslErr)
-	// 	return
-	// }
 	conn, err := grpc.DialContext(
 		context.Background(),
 		"0.0.0.0:"+strconv.Itoa(grpcPort),
@@ -338,28 +314,9 @@ func main() {
 		Handler: cors(gwmux),
 	}
 
-	// go func() {
-	// 	for {
-	// 		time.Sleep(30 * time.Second)
-
-	// 		// broker_mutex.Lock()
-	// 		set_topic := base_topic + "/gget/connection"
-	// 		client.Publish(set_topic, 1, false, "")
-
-	// 		// go func() {
-	// 		// 	_ = pub_token.Wait()
-	// 		// 	if pub_token.Error() != nil {
-	// 		// 		log.Println(pub_token.Error())
-	// 		// 	}
-	// 		// }()
-	// 		// broker_mutex.Unlock()
-	// 	}
-	// }()
-
 	go func() { //큐에 넣어서 센서데이터 batch insert하기 5초에 1번
 		for {
 			time.Sleep(5 * time.Second)
-
 			data := queue.DequeueAll()
 			if len(data) > 0 {
 				uniqueEntries := make(map[string]HistoryData)
@@ -453,7 +410,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		fmt.Fprintf(w, "uploaded file: %s", imageFilePath)
 	}
 }
@@ -476,40 +432,8 @@ func imageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// func sendEmail(attachmentPath string) error {
-// 	from := "ijoon.helper@gmail.com"
-// 	to := []string{"yot132@ijoon.net"}
-// 	subject := "File Attachment"
-// 	body := "Please find the attached file."
-
-// 	mailer := gomail.NewMessage()
-// 	mailer.SetHeader("From", from)
-// 	mailer.SetHeader("To", to...)
-// 	mailer.SetHeader("Subject", subject)
-// 	mailer.SetBody("text/plain", body)
-
-// 	attachmentName := filepath.Base(attachmentPath)
-// 	mailer.Attach(attachmentPath, gomail.Rename(attachmentName))
-
-// 	smtpHost := "smtp.gmail.com"
-// 	smtpPort := 587
-// 	smtpUsername := "ijoon.helper@gmail.com"
-// 	smtpPassword := "ycbygboiryotnjyn"
-
-// 	dialer := gomail.NewDialer(smtpHost, smtpPort, smtpUsername, smtpPassword)
-
-// 	dialer.TLSConfig = nil
-
-// 	if err := dialer.DialAndSend(mailer); err != nil {
-// 		return err
-// 	}
-
-// 	return nil
-// }
-
 func RandomString(n int) string {
 	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-
 	s := make([]rune, n)
 	for i := range s {
 		s[i] = letters[rand.Intn(len(letters))]
@@ -528,7 +452,6 @@ func NewTLSConfig() *tls.Config {
 	if err != nil {
 		panic(err)
 	}
-
 	cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
 		panic(err)
@@ -554,56 +477,38 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 		log.Println("Error creating folder:", err)
 		return
 	}
-
 	formattedTime := time.Now().Format("15:04:05")
 	fileName := formattedTime + ".raw"
 	filePath := filepath.Join(folderPath, fileName)
-
 	err = saveImageToFile(filePath, msg.Payload(), settop_serial, mac, sensor_serial)
 	if err != nil {
 		log.Println("Error saving image:", err)
-	} else {
-		// log.Println("Image saved:", filePath)
 	}
 }
 
 func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
 	mu.Lock()
 	defer mu.Unlock()
-
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	temp_min_array, temp_max_array, err := createImageFromData(data, 60, 50, 0)
 	if err != nil {
 		return errors.New("img field not found or not a string")
 	}
-
 	mImageStatus[sensor_serial] = "normal"
-
 	for i, max_temp := range temp_max_array {
 		tempWarningStr := thresholds[i].GetTempWarning()
 		tempDangerStr := thresholds[i].GetTempDanger()
-
 		tempDangerFloat, _ := strconv.ParseFloat(tempDangerStr, 64)
 		tempWarningFloat, _ := strconv.ParseFloat(tempWarningStr, 64)
-		// for _, warning_temp := range thresholds[i].GetTempWarning() {
 		if float64(max_temp) > tempWarningFloat {
 			mImageStatus[sensor_serial] = "warning"
-			// log.Println("tempWarningFloat = ", tempWarningFloat)
-			// break
 		}
-		// }
-		// for _, danger_temp := range thresholds[i].GetTempDanger() {
 		if float64(max_temp) > tempDangerFloat {
 			mImageStatus[sensor_serial] = "danger"
-			// log.Println("tempDangerFloat = ", tempDangerFloat)
-
-			// break
 		}
-		// }
 	}
 
-	// log.Println(sensor_serial, "   ", "event_end_time updated to:", mEventEndTimes[sensor_serial]+int64(EVENT_DELAY), ", ", time.Now().Unix(), "mImageStatus[sensor_serial] = ", mImageStatus[sensor_serial])
 	if mEventEndTimes[sensor_serial]+int64(EVENT_DELAY) > time.Now().Unix() { // 기존 이벤트 유지시간
 		if mImageStatus[sensor_serial] != "normal" {
 			if mStatus[sensor_serial] != mImageStatus[sensor_serial] {
@@ -630,19 +535,16 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					if err != nil {
 						log.Println(err)
 					}
-
 					query2 := fmt.Sprintf(`
 							SELECT group_uuid 
 							FROM group_gateway 
 							WHERE settop_uuid = '%s'
 						`, settop_uuid)
-
 					rows2, err := db.Query(query2)
 					if err != nil {
 						log.Println(err)
 					}
 					defer rows2.Close()
-
 					for rows2.Next() {
 						err := rows2.Scan(&group_uuid)
 						if err != nil {
@@ -679,13 +581,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 				client.Publish(set_topic, 1, false, frameJSON)
-
-				// go func() {
-				// 	_ = pub_token.Wait()
-				// 	if pub_token.Error() != nil {
-				// 		log.Println(pub_token.Error())
-				// 	}
-				// }()
 			} else { // alarm delay is added
 				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			}
@@ -695,7 +590,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		case "normal":
 			if mStatus[sensor_serial] != "normal" && mEventEndTimes[sensor_serial] > 11 {
 				mStatus[sensor_serial] = "normal"
-				// mEventEndTimes = make(map[string]int64)
 				var settop_uuid string
 				var group_uuid string
 				var sensor_uuid string
@@ -729,7 +623,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 						log.Println(err)
 					}
 					defer rows2.Close()
-
 					for rows2.Next() {
 						err := rows2.Scan(&group_uuid)
 						if err != nil {
@@ -766,14 +659,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 				client.Publish(set_topic, 1, false, frameJSON)
-				// go func() {
-
-				// 	_ = pub_token.Wait()
-				// 	if pub_token.Error() != nil {
-				// 		log.Println(pub_token.Error())
-				// 	}
-
-				// }()
 			}
 			break
 		case "warning":
@@ -781,12 +666,10 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		case "danger":
 			mStatus[sensor_serial] = mImageStatus[sensor_serial]
 			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
-
 			var settop_uuid string
 			var sensor_uuid string
 			var sensor_name string
 			var group_uuid string
-
 			query := fmt.Sprintf(`
 				SELECT uuid 
 				FROM settop 
@@ -852,16 +735,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 			frameJSON, _ := json.Marshal(j_frame)
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			client.Publish(set_topic, 1, false, frameJSON)
-
-			// go func() {
-			// 	log.Println("333333")
-			// 	_ = pub_token.Wait()
-			// 	if pub_token.Error() != nil {
-			// 		log.Println(pub_token.Error())
-			// 	}
-
-			// }()
-
 			break
 		}
 	}
@@ -893,21 +766,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 	}
 	queue.Enqueue(historyData)
 
-	// query := fmt.Sprintf(`
-	// 	INSERT INTO %s SET
-	// 		min_temp = '%f',
-	// 		max_temp = '%f',
-	// 		date = '%s'
-	// 	`,
-	// 	sensor_serial, minValue, maxValue, formattedTime)
-
-	// sqlAddRegisterer, err := db.Query(query)
-	// if err != nil {
-	// 	log.Println(err)
-	// }
-	// defer sqlAddRegisterer.Close()
-	// broker_mutex.Unlock()
-
 	return nil
 }
 
@@ -929,7 +787,6 @@ func insertBatch(db *sql.DB, data []HistoryData) error {
 		if err != nil {
 			return err
 		}
-
 		_, err = stmt.Exec(sensorData.MinValue, sensorData.MaxValue, sensorData.FormattedTime)
 		stmt.Close()
 
@@ -968,7 +825,6 @@ func sortDataByTime(data []HistoryData) {
 	for i, td := range timeData {
 		sortedData[i] = data[td.Index]
 	}
-
 	copy(data, sortedData)
 }
 
@@ -984,23 +840,19 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 			WHERE serial = '%s'
 			`,
 			sensor_serial)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 			return nil
 		}
 		defer rows.Close()
-
 		for rows.Next() {
 			err := rows.Scan(&sensor_uuid)
 			if err != nil {
 				log.Println(err)
 			}
 		}
-
 		var thresholds []*pb.Threshold
-
 		query = fmt.Sprintf(`
 			SELECT temp_warning1, temp_danger1, temp_warning2, temp_danger2, temp_warning3,
 				temp_danger3, temp_warning4, temp_danger4, temp_warning5, temp_danger5,
@@ -1075,11 +927,8 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 		log.Println(err)
 		return err
 	}
-
 	imgData, _ := base64.StdEncoding.DecodeString(j_frame["raw"].(string))
-
 	go publishStatus(imgData, settop_serial, mac, sensor_serial)
-
 	err = saveRawToFile(filePath, imgData)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
@@ -1094,12 +943,10 @@ func saveRawToFile(filePath string, rawData []byte) error {
 		return err
 	}
 	defer file.Close()
-
 	_, err = file.Write(rawData)
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1114,7 +961,6 @@ func createFolder(folderPath string) error {
 	} else if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1136,12 +982,10 @@ func getSensorDataTables(db *sql.DB) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		if containsSensorDataColumns(columnNames) {
 			sensorTables = append(sensorTables, tableName)
 		}
 	}
-
 	return sensorTables, nil
 }
 
@@ -1153,7 +997,6 @@ func getSensorDataColumns(db *sql.DB, sensorSerial string) ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var columnNames []string
 	for rows.Next() {
 		var columnName, a, b, c, d, e *string
@@ -1164,12 +1007,10 @@ func getSensorDataColumns(db *sql.DB, sensorSerial string) ([]string, error) {
 		log.Println("ColumnName:", columnName)
 		columnNames = append(columnNames, *columnName)
 	}
-
 	if err := rows.Err(); err != nil {
 		log.Println("Error iterating over rows:", err)
 		return nil, err
 	}
-
 	return columnNames, nil
 }
 
@@ -1188,7 +1029,6 @@ var folderMutex sync.Mutex
 func deleteOldImages(basePath string) {
 	ticker := time.NewTicker(1 * 24 * time.Hour) // 24시간마다 실행
 	// ticker := time.NewTicker(10 * time.Second) //test
-
 	for {
 		select {
 		case <-ticker.C:
@@ -1209,14 +1049,12 @@ func deleteOldImages(basePath string) {
 				}
 			}
 			close(resultChannel)
-
 			folders, err := getFolders(basePath)
 			if err != nil {
 				log.Println("Error getting folders:", err)
 				continue
 			}
 			resultFolderChannel := make(chan error, len(folders))
-
 			for _, folder := range folders {
 				go func(folderPath string) {
 					folderMutex.Lock()
@@ -1224,14 +1062,12 @@ func deleteOldImages(basePath string) {
 					resultFolderChannel <- deleteOldImagesInFolder(filepath.Join(basePath, folderPath))
 				}(folder)
 			}
-
 			for i := 0; i < len(folders); i++ {
 				err := <-resultFolderChannel
 				if err != nil {
 					log.Println("Error deleting old images in folder:", err)
 				}
 			}
-
 			close(resultFolderChannel)
 		}
 	}
@@ -1243,43 +1079,35 @@ func getFolders(basePath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	for _, dir := range dirs {
 		if dir.IsDir() {
 			folders = append(folders, dir.Name())
 		}
 	}
-
 	return folders, nil
 }
 
 func deleteOldDataWithTransaction(db *sql.DB, sensorSerial string) error {
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	// sevenDaysAgo := time.Now().Add(-10 * time.Second)
-
 	formattedSevenDaysAgo := sevenDaysAgo.Format("2006-01-02 15:04:05")
-
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-
 	deleteQuery := fmt.Sprintf(`
         DELETE FROM %s
         WHERE date < ?
     `, sensorSerial)
-
 	_, err = tx.Exec(deleteQuery, formattedSevenDaysAgo)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
-
 	err = tx.Commit()
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1295,8 +1123,6 @@ func deleteOldImagesInFolder(folderPath string) error {
 				if err != nil {
 					return fmt.Errorf("error deleting file %s: %w", path, err)
 					fmt.Println("Error deleting file:", err)
-				} else {
-					// fmt.Println("Deleted file:", path)
 				}
 			}
 		}
@@ -1305,19 +1131,11 @@ func deleteOldImagesInFolder(folderPath string) error {
 	if err != nil {
 		log.Println("Error deleting old images in folder:", err)
 	}
-
-	// err = os.RemoveAll(folderPath)
-	// if err != nil {
-	// 	fmt.Println("Error deleting folder:", err)
-	// } else {
-	// 	fmt.Println("Deleted folder:", folderPath)
-	// }
 	return nil
 }
 
 func SendMessageHandler(title string, body string, style string, topic string) {
 	firebaseutil.SendMessageAsync(title, body, style, topic)
-
 }
 
 func eventMessage(settop_serial string, level_temp int, sensor_name string, sensor_serial string) string {
@@ -1327,7 +1145,6 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 	var place_name string
 	var message string
 	msg_formattedTime := time.Now().Format("2006년 01월 02일 15시 04분 05초")
-
 	query := fmt.Sprintf(`
 		SELECT place_uuid, room, floor  
 		FROM settop 
@@ -1383,7 +1200,6 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 	var checkEmptyRoom string
 	if len(place_name) == 0 {
 		checkEmptyPlace = ""
-
 	} else {
 		checkEmptyPlace = place_name + " "
 		if len(floor) == 0 {
@@ -1398,7 +1214,6 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 		}
 		checkEmptyPlace = checkEmptyPlace + checkEmptyFloor + checkEmptyRoom
 	}
-
 	message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서에서 " + message_lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
 	if level_temp == 0 {
 		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 정상입니다."
@@ -1422,13 +1237,11 @@ func serverLog(place string, floor string, room string, sensor_name string, sens
 			registered_time = '%s'
 		`,
 		place, floor, room, sensor_name, sensor_serial, type_, formattedTime)
-
 	sqlAddRegisterer, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
 	defer sqlAddRegisterer.Close()
-
 }
 
 func subscribeHandler(client mqtt.Client, topic string) {
@@ -1448,9 +1261,6 @@ func subscribeHandler(client mqtt.Client, topic string) {
 
 		case strings.HasPrefix(topic, base_topic+"/deregist/sensor/"):
 			handleDeregistSensor(client, parts)
-
-		// case strings.HasPrefix(topic, base_topic+"/data/threshold9/"):
-		// 	handleThreshold9Data(client, parts, msg.Payload())
 
 		case strings.HasPrefix(topic, base_topic+"/data/frame/"):
 			handleFrameData(client, parts, msg.Payload(), msg)
@@ -1504,14 +1314,6 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	message := settop_serial
 	log.Println(settop_serial)
 	client.Publish(set_topic, 1, false, message)
-
-	// go func() {
-	// 	_ = pub_token.Wait()
-	// 	if pub_token.Error() != nil {
-	// 		log.Println(pub_token.Error())
-	// 	}
-	// }()
-	// broker_mutex.Unlock()
 }
 
 func createSensorDataTable(db *sql.DB, tableName string) error {
@@ -1526,12 +1328,10 @@ func createSensorDataTable(db *sql.DB, tableName string) error {
 			KEY fk_history_trusafer (id)
 			) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`, tableName)
-
 	_, err := db.Exec(query)
 	if err != nil {
 		return err
 	}
-
 	fmt.Printf("%s 테이블이 성공적으로 생성되었습니다.\n", tableName)
 	return nil
 }
@@ -1562,7 +1362,6 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	if err != nil {
 		log.Println(err)
 	}
-
 	defer rows.Close()
 	for rows.Next() {
 		err := rows.Scan(&settop_uuid, &place_uuid, &floor, &room)
@@ -1574,7 +1373,6 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 		log.Println("settop_uuid not found")
 		return
 	}
-
 	query = fmt.Sprintf(`
 			SELECT name 
 			FROM place 
@@ -1621,28 +1419,22 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 		sensorSerial, "", "",
 		formattedTime, settopMac, sensorSerial, payloadStr,
 	)
-
 	sqlAddSensor, err := db.Query(query)
-
 	if err != nil {
 		log.Println(err)
 	}
-
 	var get_sensor_uuid string
 	var sensor_name string
-
 	query = fmt.Sprintf(`
 			SELECT uuid, name 
 			FROM sensor 
 			WHERE serial = '%s'
 		`,
 		sensorSerial)
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
-
 	defer rows.Close()
 	for rows.Next() {
 		err := rows.Scan(&get_sensor_uuid, &sensor_name)
@@ -1653,22 +1445,10 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	mainListMapping = NewMainListResponseMapping()
 	initThreshold9Data(get_sensor_uuid)
 	defer sqlAddSensor.Close()
-
 	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 1)
-
-	// serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
-
 	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
 	message := "info"
 	client.Publish(set_topic, 1, false, message)
-
-	// go func() {
-	// 	_ = pub_token.Wait()
-	// 	if pub_token.Error() != nil {
-	// 		log.Println(pub_token.Error())
-	// 	}
-	// }()
-	// broker_mutex.Unlock()
 }
 
 func handleDeregistSensor(client mqtt.Client, parts []string) {
@@ -1690,7 +1470,6 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		log.Println(err)
 	}
 	mainListMapping = NewMainListResponseMapping()
-
 	var place_uuid string
 	var place_name string
 	var floor string
@@ -1720,7 +1499,6 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 			WHERE uuid = '%s' 
 		`,
 		place_uuid)
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1742,7 +1520,6 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 			WHERE serial = '%s'
 		`,
 		sensorSerial)
-
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -1755,9 +1532,7 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 			log.Println(err)
 		}
 	}
-
 	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
-
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1802,12 +1577,10 @@ func initThreshold9Data(sensor_uuid string) {
 func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqtt.Message) {
 	broker_mutex.Lock()
 	defer broker_mutex.Unlock()
-
 	basePath := "storage_data/"
 	processMqttMessage(msg, basePath)
 	var decodedData map[string]interface{}
 	err := json.Unmarshal(msg.Payload(), &decodedData)
-	// broker_mutex.Unlock()
 	if err != nil {
 		// serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
 		fmt.Println("JSON decoding error:", err)
@@ -1815,10 +1588,7 @@ func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqt
 	}
 }
 
-// var aliveSensorLastAliveTime = make(map[string]time.Time)
-
 func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
-
 	settop_serial := parts[3]
 	mac := parts[4]
 	query := fmt.Sprintf(`
@@ -1831,23 +1601,10 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	if err != nil {
 		log.Println(err)
 	}
-	// log.Println("handleConnectionData called: ", settop_serial, ", ", payloadStr)
-
-	// query = fmt.Sprintf(`
-	// 			UPDATE sensor SET
-	// 				status = '%s'
-	// 			`,
-	// 	"0")
-	// _, err = db.Exec(query)
-	// if err != nil {
-	// 	log.Println(err)
-	// }
-
 	if payloadStr == "0" {
 		broker_mutex.Lock()
 		defer broker_mutex.Unlock()
 		log.Println("e1: ", mac)
-
 		query = fmt.Sprintf(`
 				UPDATE sensor SET
 					status = '%s'
@@ -1863,14 +1620,12 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 		defer broker_mutex.Unlock()
 		var checkStatus string
 		var checkSerial string
-
 		query := fmt.Sprintf(`
 			SELECT status, serial 
 			FROM sensor 
 			WHERE mac = '%s'
 		`,
 			mac)
-
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -1900,9 +1655,7 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	if err != nil {
 		log.Println(err)
 	}
-
 	mainListMapping = NewMainListResponseMapping()
-	// broker_mutex.Unlock()
 }
 
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
@@ -1912,7 +1665,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
 	mac := parts[4]
-
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	var status string
@@ -1924,13 +1676,11 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			var group_uuid string
 			var sensor_uuid string
 			var sensor_name string
-
 			query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
-
 			rows1, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -1941,7 +1691,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				if err != nil {
 					log.Println(err)
 				}
-
 				query2 := fmt.Sprintf(`
 						SELECT group_uuid 
 						FROM group_gateway 
@@ -1953,7 +1702,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 					log.Println(err)
 				}
 				defer rows2.Close()
-
 				for rows2.Next() {
 					err := rows2.Scan(&group_uuid)
 					if err != nil {
@@ -1967,7 +1715,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				FROM sensor 
 				WHERE serial = '%s'
 			`, sensor_serial)
-
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -1989,15 +1736,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			}
 			frameJSON, _ := json.Marshal(j_frame)
 			client.Publish(set_topic, 1, false, frameJSON)
-
-			// go func() {
-
-			// 	_ = pub_token.Wait()
-			// 	if pub_token.Error() != nil {
-			// 		log.Println(pub_token.Error())
-			// 	}
-
-			// }()
 		}
 	} else {
 		status, _ = j_frame["status"].(string)
@@ -2078,7 +1816,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			FROM group_ 
 			WHERE name = 'master'
 		`)
-
 		rows, err = db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -2091,23 +1828,6 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			}
 		}
 		SendMessageHandler("Trusafer", message, "style", group_master_uuid)
-
-		// query = fmt.Sprintf(`
-		// 	INSERT INTO log_ SET
-		// 		uuid = '%s',
-		// 		unit = '%s',
-		// 		message = '%s',
-		// 		sensor_serial = '%s',
-		// 		registered_time = '%s'
-		// 	`,
-		// 	uuid.String(), "mobile", message, sensor_serial, formattedTime)
-
-		// sqlAddRegisterer, err := db.Query(query)
-		// if err != nil {
-		// 	log.Println(err)
-		// }
-		// defer sqlAddRegisterer.Close()
-
 		sensorSerial := parts[5]
 		query = fmt.Sprintf(`
 			UPDATE sensor SET
@@ -2115,16 +1835,12 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			WHERE serial = '%s'
 			`,
 			strconv.Itoa(result), sensorSerial)
-
 		_, err = db.Exec(query)
 		if err != nil {
 			log.Println(err)
 		}
 		mainListMapping = NewMainListResponseMapping()
-
 	}
-	// broker_mutex.Unlock()
-
 }
 
 func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
@@ -2136,9 +1852,7 @@ func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg m
 	if err != nil {
 		log.Println(err)
 	}
-
 	fw_version, _ := j_frame["fw_version"].(string)
-
 	settop_serial := parts[3]
 	query := fmt.Sprintf(`
 		UPDATE settop SET
@@ -2146,42 +1860,33 @@ func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg m
 		WHERE serial = '%s'
 		`,
 		fw_version, settop_serial)
-
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
 	mainListMapping = NewMainListResponseMapping()
-	// broker_mutex.Unlock()
 }
 
 func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, error) {
 	min := 255.
 	max := 0.
-
 	TEMP_MIN := 174.7
-
 	// y 0~16, y 17~33, y 34~49,
 	// x 0~19, 20~39, 40~59
 	min_arr := [9]float64{999, 999, 999, 999, 999, 999, 999, 999, 999}
 	max_arr := [9]float64{0, 0, 0, 0, 0, 0, 0, 0, 0}
-
 	for y := 0; y < height-startRow; y++ {
 		for x := 0; x < width; x++ {
 			index := ((startRow+y)*width + x) * 2
 			pixelData := data[index : index+2]
 			rawValue := binary.BigEndian.Uint16(pixelData)
 			temp := ((float64(rawValue)-2047)/10. + 30) + TEMP_MIN
-
-			// find global min/max
 			if temp < min {
 				min = temp
 			}
 			if temp > max {
 				max = temp
 			}
-
-			// find 9 area min/max
 			var row int
 			if y < int(math.Round(float64(height/3.))) {
 				row = 0
@@ -2208,13 +1913,11 @@ func createImageFromData(data []byte, width, height, startRow int) ([9]float64, 
 			}
 		}
 	}
-
 	for i, value := range max_arr {
 		max_arr[i] = math.Round((value-TEMP_MIN)*10) / 10
 	}
 	for i, value := range min_arr {
 		min_arr[i] = math.Round((value-TEMP_MIN)*10) / 10
 	}
-
 	return min_arr, max_arr, nil
 }
