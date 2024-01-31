@@ -568,8 +568,8 @@ func processMqttMessage(msg mqtt.Message, basePath string) {
 }
 
 func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
-	broker_mutex.Lock()
-	defer broker_mutex.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
@@ -947,7 +947,6 @@ func insertBatch(db *sql.DB, data []HistoryData) error {
 }
 
 func sortDataByTime(data []HistoryData) {
-	// time.Time 형태로 변환
 	timeData := make([]struct {
 		time.Time
 		Index int
@@ -961,18 +960,15 @@ func sortDataByTime(data []HistoryData) {
 		}{parsedTime, i}
 	}
 
-	// 정렬
 	sort.Slice(timeData, func(i, j int) bool {
 		return timeData[i].Time.Before(timeData[j].Time)
 	})
 
-	// 정렬된 순서로 데이터 갱신
 	sortedData := make([]HistoryData, len(data))
 	for i, td := range timeData {
 		sortedData[i] = data[td.Index]
 	}
 
-	// 원본 데이터 갱신
 	copy(data, sortedData)
 }
 
@@ -1108,7 +1104,6 @@ func saveRawToFile(filePath string, rawData []byte) error {
 }
 
 func createFolder(folderPath string) error {
-	// 폴더가 존재하지 않으면 생성
 	_, err := os.Stat(folderPath)
 	if os.IsNotExist(err) {
 		err := os.MkdirAll(folderPath, os.ModePerm)
@@ -1142,7 +1137,6 @@ func getSensorDataTables(db *sql.DB) ([]string, error) {
 			return nil, err
 		}
 
-		// 특정 컬럼이 포함된 테이블만 선택
 		if containsSensorDataColumns(columnNames) {
 			sensorTables = append(sensorTables, tableName)
 		}
@@ -1326,7 +1320,7 @@ func SendMessageHandler(title string, body string, style string, topic string) {
 
 }
 
-func eventMessage(settop_serial string, sensor_type string, level_temp int, sensor_serial string) string {
+func eventMessage(settop_serial string, level_temp int, sensor_name string, sensor_serial string) string {
 	var place_uuid string
 	var room string
 	var floor string
@@ -1373,51 +1367,68 @@ func eventMessage(settop_serial string, sensor_type string, level_temp int, sens
 			log.Println(err)
 		}
 	}
-
-	var lev string
+	var message_lev string
 	if level_temp == 1 {
-		lev = "이상징후 (주의)"
-		serverLog("이상징후가 발견되었습니다. (주의)", "anomaly", sensor_serial)
+		message_lev = "이상징후 (주의)"
 	} else if level_temp == 2 {
-		lev = "이상징후 (위험)"
-		serverLog("이상징후가 발견되었습니다. (위험)", "anomaly", sensor_serial)
+		message_lev = "이상징후 (위험)"
 	} else if level_temp == 3 {
-		lev = "이상징후 (점검)"
-		serverLog("이상징후가 발견되었습니다. (점검)", "anomaly", sensor_serial)
+		message_lev = "이상징후 (점검)"
 	}
+
+	go serverLog(place_name, floor, room, sensor_name, sensor_serial, level_temp+2)
+
 	var checkEmptyPlace string
-	if place_name == "" && floor == "" {
+	var checkEmptyFloor string
+	var checkEmptyRoom string
+	if len(place_name) == 0 {
 		checkEmptyPlace = ""
+
 	} else {
-		checkEmptyPlace = place_name + " " + floor + "에 설치된 "
+		checkEmptyPlace = place_name + " "
+		if len(floor) == 0 {
+			checkEmptyFloor = ""
+		} else {
+			checkEmptyFloor = floor + "층 "
+		}
+		if len(room) == 0 {
+			checkEmptyRoom = ""
+		} else {
+			checkEmptyRoom = room + "호실 "
+		}
+		checkEmptyPlace = checkEmptyPlace + checkEmptyFloor + checkEmptyRoom
 	}
-	message = msg_formattedTime + " " + checkEmptyPlace + room + " " + sensor_type + " 센서에서 " + lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
+
+	message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서에서 " + message_lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
 	if level_temp == 0 {
-		message = msg_formattedTime + " " + checkEmptyPlace + room + " " + sensor_type + " 센서가 정상입니다."
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 정상입니다."
 	}
 	return message
 }
 
-func serverLog(message string, unit string, sensor_serial string) {
-	var uuid = uuid.New()
-
+func serverLog(place string, floor string, room string, sensor_name string, sensor_serial string, type_ int) {
 	formattedTime := time.Now().Format("2006-01-02 15:04:05")
+	mu.Lock()
+	defer mu.Unlock()
 
 	query := fmt.Sprintf(`
-		INSERT INTO log SET
-			uuid = '%s', 
-			unit = '%s',
-			message = '%s',
+		INSERT INTO log_ SET
+			place = '%s', 
+			floor = '%s',
+			room = '%s',
+			sensor_name = '%s',
 			sensor_serial = '%s',
+			type = '%d',
 			registered_time = '%s'
 		`,
-		uuid.String(), unit, message, sensor_serial, formattedTime)
+		place, floor, room, sensor_name, sensor_serial, type_, formattedTime)
 
 	sqlAddRegisterer, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
 	defer sqlAddRegisterer.Close()
+
 }
 
 func subscribeHandler(client mqtt.Client, topic string) {
@@ -1461,7 +1472,6 @@ func subscribeHandler(client mqtt.Client, topic string) {
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	broker_mutex.Lock()
 	defer broker_mutex.Unlock()
-	log.Println("111")
 
 	var settop_serial string
 	mac := parts[3]
@@ -1471,12 +1481,10 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 		WHERE mac1 = '%s' OR mac2 = '%s'
 	`,
 		mac, mac)
-	log.Println("222: ", mac)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
-	log.Println("?")
 	defer rows.Close()
 	for rows.Next() {
 		err := rows.Scan(&settop_serial)
@@ -1484,17 +1492,14 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 			log.Println(err)
 		}
 	}
-	log.Println("333")
 	if settop_serial == "" {
 		log.Println("err settop_serial mac : ", mac)
 		return
 	}
-	log.Println("444")
 	if mac == "" {
 		log.Println("err mac empty")
 		return
 	}
-	log.Println("555")
 	set_topic := base_topic + "/data/settop_sn/" + mac
 	message := settop_serial
 	log.Println(settop_serial)
@@ -1538,13 +1543,17 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var settop_uuid string
+	var place_uuid string
+	var place_name string
+	var floor string
+	var room string
 	var uuid = uuid.New()
 	settop_serial := parts[3]
 	settopMac := parts[4]
 	sensorSerial := parts[5]
 	createSensorDataTable(db, sensorSerial)
 	query := fmt.Sprintf(`
-		SELECT uuid 
+		SELECT uuid, place_uuid, floor, room  
 		FROM settop 
 		WHERE mac1 = '%s' OR mac2 = '%s'
 	`,
@@ -1556,7 +1565,7 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 
 	defer rows.Close()
 	for rows.Next() {
-		err := rows.Scan(&settop_uuid)
+		err := rows.Scan(&settop_uuid, &place_uuid, &floor, &room)
 		if err != nil {
 			log.Println(err)
 		}
@@ -1564,6 +1573,26 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	if settop_uuid == "" {
 		log.Println("settop_uuid not found")
 		return
+	}
+
+	query = fmt.Sprintf(`
+			SELECT name 
+			FROM place 
+			WHERE uuid = '%s' 
+		`,
+		place_uuid)
+
+	rows, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&place_name)
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	query = fmt.Sprintf(`
@@ -1598,10 +1627,36 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	if err != nil {
 		log.Println(err)
 	}
+
+	var get_sensor_uuid string
+	var sensor_name string
+
+	query = fmt.Sprintf(`
+			SELECT uuid, name 
+			FROM sensor 
+			WHERE serial = '%s'
+		`,
+		sensorSerial)
+
+	rows, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&get_sensor_uuid, &sensor_name)
+		if err != nil {
+			log.Println(err)
+		}
+	}
 	mainListMapping = NewMainListResponseMapping()
-	initThreshold9Data(uuid.String())
+	initThreshold9Data(get_sensor_uuid)
 	defer sqlAddSensor.Close()
-	serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
+
+	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 1)
+
+	// serverLog("센서가 서버에 연결되었습니다.", "web", sensorSerial)
 
 	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
 	message := "info"
@@ -1621,6 +1676,7 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 	defer broker_mutex.Unlock()
 
 	sensorSerial := parts[5]
+	settopSerial := parts[3]
 	log.Println("handleDeregistSensor called: ", sensorSerial)
 	query := fmt.Sprintf(`
 		UPDATE sensor SET
@@ -1634,8 +1690,74 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		log.Println(err)
 	}
 	mainListMapping = NewMainListResponseMapping()
-	serverLog("센서의 연결이 끊어졌습니다.", "web", sensorSerial)
-	// broker_mutex.Unlock()
+
+	var place_uuid string
+	var place_name string
+	var floor string
+	var room string
+	query = fmt.Sprintf(`
+		SELECT place_uuid, floor, room  
+		FROM settop 
+		WHERE serial = '%s' 
+	`,
+		settopSerial)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&place_uuid, &floor, &room)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	query = fmt.Sprintf(`
+			SELECT name 
+			FROM place 
+			WHERE uuid = '%s' 
+		`,
+		place_uuid)
+
+	rows, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&place_name)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	var sensor_name string
+
+	query = fmt.Sprintf(`
+			SELECT name 
+			FROM sensor 
+			WHERE serial = '%s'
+		`,
+		sensorSerial)
+
+	rows, err = db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_name)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
+
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1687,7 +1809,7 @@ func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqt
 	err := json.Unmarshal(msg.Payload(), &decodedData)
 	// broker_mutex.Unlock()
 	if err != nil {
-		serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
+		// serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
 		fmt.Println("JSON decoding error:", err)
 		return
 	}
@@ -1774,10 +1896,6 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 			}
 		}
 	}
-	// else {
-	// 	aliveSensorLastAliveTime[mac] = time.Now()
-	// }
-	// go checkAndUpdateDeadSensors()
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1787,39 +1905,10 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	// broker_mutex.Unlock()
 }
 
-// func checkAndUpdateDeadSensors() {
-// 	mu.Lock()
-// 	defer mu.Unlock()
-
-// 	currentTime := time.Now()
-
-// 	for mac, lastAliveTime := range aliveSensorLastAliveTime {
-// 		// log.Println("1 = ", currentTime.Sub(lastAliveTime), ", 2 = ", 10*time.Second)
-// 		if currentTime.Sub(lastAliveTime) > 1*time.Minute {
-// 			delete(aliveSensorLastAliveTime, mac)
-// 			// The last alive time is more than 1 minute ago, update the database
-// 			query := fmt.Sprintf(`
-//                 UPDATE sensor SET
-//                     status = '%s'
-//                 WHERE mac = '%s'
-//             `, "3", mac)
-
-// 			_, err := db.Exec(query)
-// 			if err != nil {
-// 				log.Println(err)
-// 			}
-// 		}
-// 	}
-// }
-
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	currentTime := time.Now()
-	formattedTime := currentTime.Format("2006-01-02 15:04:05")
-	var uuid = uuid.New()
-	var sensor_type sql.NullString
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
 	mac := parts[4]
@@ -1925,27 +2014,25 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 		result = 3
 	}
 	if result >= 0 {
+		var sensor_name string
 		query := fmt.Sprintf(`
-		SELECT type 
-		FROM sensor 
-		WHERE serial = '%s'
-	`,
-			sensor_serial)
+				SELECT name 
+				FROM sensor 
+				WHERE serial = '%s'
+			`, sensor_serial)
 
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 		}
-
 		defer rows.Close()
 		for rows.Next() {
-			err := rows.Scan(&sensor_type)
+			err := rows.Scan(&sensor_name)
 			if err != nil {
 				log.Println(err)
 			}
 		}
-
-		message := eventMessage(settop_serial, getNullStringValidValue(sensor_type), result, sensor_serial)
+		message := eventMessage(settop_serial, result, sensor_name, sensor_serial)
 		var settop_uuid string
 		var group_uuid string
 		query = fmt.Sprintf(`
@@ -2003,24 +2090,23 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				log.Println(err)
 			}
 		}
-		log.Println("222", sensor_serial)
 		SendMessageHandler("Trusafer", message, "style", group_master_uuid)
 
-		query = fmt.Sprintf(`
-			INSERT INTO log SET
-				uuid = '%s', 
-				unit = '%s',
-				message = '%s',
-				sensor_serial = '%s',
-				registered_time = '%s'
-			`,
-			uuid.String(), "mobile", message, sensor_serial, formattedTime)
+		// query = fmt.Sprintf(`
+		// 	INSERT INTO log_ SET
+		// 		uuid = '%s',
+		// 		unit = '%s',
+		// 		message = '%s',
+		// 		sensor_serial = '%s',
+		// 		registered_time = '%s'
+		// 	`,
+		// 	uuid.String(), "mobile", message, sensor_serial, formattedTime)
 
-		sqlAddRegisterer, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer sqlAddRegisterer.Close()
+		// sqlAddRegisterer, err := db.Query(query)
+		// if err != nil {
+		// 	log.Println(err)
+		// }
+		// defer sqlAddRegisterer.Close()
 
 		sensorSerial := parts[5]
 		query = fmt.Sprintf(`

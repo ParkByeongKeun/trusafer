@@ -1108,6 +1108,7 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 			response.SettopList = append(response.SettopList, settopList)
 		}
 	} else {
+		groupSettopUUIDs := make(map[string]bool)
 
 		readRegistererResponse, _ := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
 			Name: "check",
@@ -1134,9 +1135,11 @@ func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListReques
 					return nil, err
 				}
 
-				if getNullStringValidValue(group_settop_uuid) == "" {
+				if getNullStringValidValue(group_settop_uuid) == "" || groupSettopUUIDs[getNullStringValidValue(group_settop_uuid)] {
 					continue
 				}
+
+				groupSettopUUIDs[getNullStringValidValue(group_settop_uuid)] = true
 
 				query := fmt.Sprintf(`
 				SELECT uuid, place_uuid, serial, room, floor, mac1, mac2, is_alive, fw_version, registered_time  
@@ -1469,44 +1472,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			log.Println(err)
 		}
 	}
-	//============================= mqtt publish //=============================//=============================
-	// set_topic := "trusafer/" + settop_serial + "/" + in.Sensor.IpModuleMac + "/" + in.Sensor.GetSerial() + "/threshold9/set"
-	// thresholdsBytes, err := json.Marshal(thresholds)
-
-	// var jsonData []map[string]string
-	// if err := json.Unmarshal(thresholdsBytes, &jsonData); err != nil {
-	// 	fmt.Println("JSON Unmarshal error:", err)
-	// }
-
-	// result := map[string][]int{
-	// 	"danger":  make([]int, len(jsonData)),
-	// 	"warning": make([]int, len(jsonData)),
-	// }
-
-	// for i, item := range jsonData {
-	// 	danger, _ := strconv.Atoi(item["temp_danger"])
-	// 	warning, _ := strconv.Atoi(item["temp_warning"])
-
-	// 	result["danger"][i] = danger
-	// 	result["warning"][i] = warning
-	// }
-
-	// resultJSON, err := json.Marshal(result)
-	// if err != nil {
-	// 	log.Println("JSON Marshal error:", err)
-	// }
-
-	// pub_token := client.Publish(set_topic, 0, false, resultJSON)
-
-	// go func() {
-	// 	_ = pub_token.Wait() // Can also use '<-t.Done()' in releases > 1.2.0
-	// 	if pub_token.Error() != nil {
-	// 		log.Println(pub_token.Error()) // Use your preferred logging technique (or just fmt.Printf)
-	// 	}
-	// 	// time.Sleep(10 * time.Second)
-
-	// }()
-	//============================= mqtt publish //=============================//=============================
 	log.Println("update sensor complete: ", affectedCount)
 
 	return &pb.UpdateSensorResponse{}, nil
@@ -1820,102 +1785,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 	}
 	return response, nil
 }
-
-// func (s *server) CreateHistory(ctx context.Context, in *pb.CreateHistoryRequest) (*pb.CreateHistoryResponse, error) {
-// 	log.Printf("Received AddHistory: %s, %s, %f, %f, %s",
-// 		in.History.GetUuid(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
-// 	var uuid = uuid.New()
-
-// 	query := fmt.Sprintf(`
-// 		INSERT INTO history SET
-// 			uuid = '%s',
-// 			sensor_serial = '%s',
-// 			min_temp = '%f',
-// 			max_temp = '%f',
-// 			date = '%s'
-// 		`,
-// 		uuid.String(), in.History.GetSensorSerial(), in.History.GetMinTemp(), in.History.GetMaxTemp(), in.History.GetDate())
-
-// 	sqlAddRegisterer, err := db.Query(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-// 		return nil, err
-// 	}
-// 	defer sqlAddRegisterer.Close()
-
-// 	return &pb.CreateHistoryResponse{}, nil
-// }
-
-// func (s *server) DeleteHistory(ctx context.Context, in *pb.DeleteHistoryRequest) (*pb.DeleteHistoryResponse, error) {
-// 	log.Printf("Received DeleteHistory: %s", in.GetHistoryUuid())
-
-// 	query := fmt.Sprintf(`
-// 		DELETE FROM history
-// 		WHERE uuid = '%s'
-// 		`,
-// 		in.GetHistoryUuid())
-
-// 	sqlDeleteRegisterer, err := db.Exec(query)
-// 	if err != nil {
-// 		log.Println(err)
-// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-// 		return nil, err
-// 	}
-// 	nRow, err := sqlDeleteRegisterer.RowsAffected()
-// 	if err != nil {
-// 		log.Println(err)
-// 		return nil, err
-// 	}
-// 	fmt.Println("delete count : ", nRow)
-// 	return &pb.DeleteHistoryResponse{}, nil
-// }
-
-// func (s *server) ReadHistory(ctx context.Context, in *pb.ReadHistoryRequest) (*pb.ReadHistoryResponse, error) {
-// 	log.Printf("Received GetHistory: %s", in.GetHistoryUuid())
-// 	response := &pb.ReadHistoryResponse{}
-
-// 	var uuid string
-// 	var sensor_serial string
-// 	var min_temp float32
-// 	var max_temp float32
-// 	var date string
-
-// 	query := fmt.Sprintf(`
-// 		SELECT uuid, sensor_serial, min_temp, max_temp, date
-// 		FROM history
-// 		WHERE uuid = '%s'
-// 		`,
-// 		in.GetHistoryUuid())
-
-// 	rows, err := db.Query(query)
-
-// 	if err != nil {
-// 		log.Println(err)
-// 		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	for rows.Next() {
-// 		err := rows.Scan(&uuid, &sensor_serial, &min_temp, &max_temp, &date)
-// 		if err != nil {
-// 			log.Println(err)
-// 			return nil, status.Errorf(codes.Internal, "Failed to scan history row: %v", err)
-// 		}
-
-// 		history := &pb.History{}
-// 		history.Uuid = uuid
-// 		history.SensorSerial = sensor_serial
-// 		history.MinTemp = min_temp
-// 		history.MaxTemp = max_temp
-// 		history.Date = date
-
-// 		response.History = history
-// 	}
-
-// 	return response, nil
-// }
 
 func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequest) (*pb.ReadHistoryListResponse, error) {
 	log.Printf("Received GetHistoryList: called")
@@ -2683,19 +2552,29 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 	for _, topic := range topics {
 		err = firebaseutil.SubscribeToTopic(tokens, topic, in.GetIsSubscribe())
 		query := fmt.Sprintf(`
-		INSERT IGNORE INTO firebase_token SET 
-			token = '%s',
-			group_uuid = '%s',
-			email = '%s'
-		`,
+		SELECT COUNT(*) FROM firebase_token 
+		WHERE token = '%s' AND group_uuid = '%s' AND email = '%s'`,
 			in.GetToken(), topic, claims.Email)
-		sqlAddRegisterer, err := db.Query(query)
+
+		var count int
+		err := db.QueryRow(query).Scan(&count)
 		if err != nil {
 			log.Println(err)
-			err = status.Errorf(codes.InvalidArgument, "Not Found Data: %v", err)
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		}
-		defer sqlAddRegisterer.Close()
+
+		if count == 0 {
+			insertQuery := fmt.Sprintf(`
+		INSERT INTO firebase_token (token, group_uuid, email)
+		VALUES ('%s', '%s', '%s')`,
+				in.GetToken(), topic, claims.Email)
+
+			_, err := db.Exec(insertQuery)
+			if err != nil {
+				log.Println(err)
+				return nil, status.Errorf(codes.Internal, "Internal Server Error: %v", err)
+			}
+		}
 	}
 
 	if err != nil {
@@ -2709,33 +2588,42 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 	log.Printf("LogList called")
 	response := &pb.LogListResponse{}
 
+	mainListResponse, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
+	if ok {
+		fmt.Println("MainListResponse found")
+	} else {
+		mainListResponse, _ = s.MainList(ctx, &pb.MainListRequest{
+			RegistererUuid: in.GetRegistererUuid(),
+		})
+	}
+
 	query := ""
 
-	if in.GetUnit() == "mobile" {
-		sensorSerials := in.GetMobileBulkSensorSerial()
+	if len(in.GetSensorSerial()) <= 0 {
 		var sensorSerialClauses []string
-
-		for _, sensorSerial := range sensorSerials {
-			sensorSerialClauses = append(sensorSerialClauses, fmt.Sprintf("'%s'", sensorSerial))
+		for _, sensor := range mainListResponse.SensorList {
+			sensorSerialClauses = append(sensorSerialClauses, fmt.Sprintf("'%s'", sensor.Serial))
 		}
 
 		sensorSerialsCondition := strings.Join(sensorSerialClauses, ",")
-
+		if sensorSerialsCondition == "" {
+			return response, nil
+		}
 		query = fmt.Sprintf(`
-		SELECT uuid, unit, message, registered_time 
-		FROM log 
-		WHERE unit = '%s' AND sensor_serial IN (%s) 
+		SELECT place, floor, room, sensor_name, type, registered_time  
+		FROM log_ 
+		WHERE sensor_serial IN (%s) 
 		ORDER by id desc 
 		LIMIT %d, %d 
-	`, in.GetUnit(), sensorSerialsCondition, in.GetCursor(), in.GetCount())
+	`, sensorSerialsCondition, in.GetCursor(), in.GetCount())
 	} else {
 		query = fmt.Sprintf(`
-		SELECT uuid, unit, message, registered_time 
-		FROM log 
-		WHERE unit = '%s' AND sensor_serial = '%s'
+		SELECT place, floor, room, sensor_name, type, registered_time 
+		FROM log_ 
+		WHERE sensor_serial = '%s'
 		ORDER by id desc 
 		LIMIT %d, %d 
-	`, in.GetUnit(), in.GetSensorSerial(), in.GetCursor(), in.GetCount())
+	`, in.GetSensorSerial(), in.GetCursor(), in.GetCount())
 	}
 
 	rows, err := db.Query(query)
@@ -2747,24 +2635,27 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 	defer rows.Close()
 
 	for rows.Next() {
-		var uuid string
-		var unit string
-		var message string
+		var place string
+		var floor string
+		var room string
+		var sensor_name string
+		var type_ uint64
 		var registered_time string
-		err := rows.Scan(&uuid, &unit, &message, &registered_time)
+		err := rows.Scan(&place, &floor, &room, &sensor_name, &type_, &registered_time)
 		if err != nil {
 			log.Println(err)
 			return nil, status.Errorf(codes.Internal, "Failed to scan log row: %v", err)
 		}
-
-		logList := &pb.Log{
-			Uuid:           uuid,
-			Unit:           unit,
-			Message:        message,
+		logEntry := &pb.LogItem{
+			Place:          place,
+			Floor:          floor,
+			Room:           room,
+			SensorName:     sensor_name,
+			Type:           pb.TypeStatus(type_),
 			RegisteredTime: registered_time,
 		}
 
-		response.Log = append(response.Log, logList)
+		response.Log = append(response.Log, logEntry)
 	}
 	return response, nil
 }
@@ -2819,6 +2710,8 @@ func (s *server) CreateRegistererGroup(ctx context.Context, in *pb.CreateRegiste
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
 		}
+		defer mainListMapping.RemoveMapping(registererUUID)
+
 		defer sqlAddRegisterer.Close()
 	}
 
@@ -2909,6 +2802,7 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 		}
 		defer sqlAddRegisterer.Close()
 	}
+	defer mainListMapping.RemoveMapping(in.GetGroupUuid())
 
 	return &pb.DeleteRegistererGroupResponse{}, nil
 }

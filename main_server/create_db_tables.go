@@ -181,12 +181,14 @@ func createDBTablesIfNotExist() error {
 	defer sqlCreateGroup.Close()
 
 	query = fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS log (
+		CREATE TABLE IF NOT EXISTS log_ (
 			id int(11) NOT NULL AUTO_INCREMENT,
-			uuid VARCHAR(36) NOT NULL,
-			unit VARCHAR(36) NOT NULL,
+			place VARCHAR(36) NOT NULL,
+			floor VARCHAR(36) NOT NULL,
+			room VARCHAR(36) NOT NULL,
+			sensor_name VARCHAR(36) NOT NULL,
 			sensor_serial VARCHAR(36) NOT NULL,
-			message varchar(255) DEFAULT NULL,
+			type smallint(5) unsigned DEFAULT 0,
 			registered_time datetime DEFAULT NULL,
 			PRIMARY KEY (id)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
