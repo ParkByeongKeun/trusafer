@@ -1465,7 +1465,6 @@ func (s *server) CreateSensor(ctx context.Context, in *pb.CreateSensorRequest) (
 func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (*pb.UpdateSensorResponse, error) {
 	DeleteMainList(s, ctx)
 	thresholdMapping = NewThresholdMapping()
-	mGroupUUIDs = nil
 	permission := s.getPermission(ctx)
 	if !permission.SensorInfo {
 		log.Println("err permission")
