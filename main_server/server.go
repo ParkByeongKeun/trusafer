@@ -197,6 +197,8 @@ func main() {
 	saveImageDir = Conf.Etc.SaveImageDir
 	gwPort := Conf.Gw.Port
 	imPort := Conf.Im.Port
+	brokerUserId := Conf.Broker.UserId
+	brokerUserPassword := Conf.Broker.UserPassword
 	secret_key_at := Conf.Jwt.SecretKeyAT
 	token_duration_at := Conf.Jwt.TokenDurationAT
 
@@ -210,15 +212,12 @@ func main() {
 	// broker := "ssl://192.168.13.5:21984"
 	broker := "ssl://broker:1883"
 	mqtt_serial := RandomString(15)
-	username := "ijoon"
-	password := "vXH5iVMqTfXB"
-	// password := "9DGQhyCH6RZ4"
 	base_topic = "trusafer"
 	opts1 := mqtt.NewClientOptions().AddBroker(broker)
 	tlsconfig := NewTLSConfig()
 	opts1.SetClientID(mqtt_serial).SetTLSConfig(tlsconfig)
-	opts1.SetUsername(username)
-	opts1.SetPassword(password)
+	opts1.SetUsername(brokerUserId)
+	opts1.SetPassword(brokerUserPassword)
 	opts1.SetCleanSession(true)
 	opts1.SetConnectionLostHandler(func(c mqtt.Client, err error) {
 		println("mqtt connection lost error: " + err.Error())
@@ -1004,7 +1003,7 @@ func getSensorDataColumns(db *sql.DB, sensorSerial string) ([]string, error) {
 			log.Println("Error scanning column name:", err)
 			return nil, err
 		}
-		log.Println("ColumnName:", columnName)
+		// log.Println("ColumnName:", columnName)
 		columnNames = append(columnNames, *columnName)
 	}
 	if err := rows.Err(); err != nil {
@@ -1591,12 +1590,18 @@ func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqt
 func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
 	settop_serial := parts[3]
 	mac := parts[4]
+	isalive := "0"
+	if payloadStr == "0" {
+		isalive = "0"
+	} else {
+		isalive = "1"
+	}
 	query := fmt.Sprintf(`
 		UPDATE settop SET
 			is_alive = '%s'
 		WHERE serial = '%s'
 		`,
-		payloadStr, settop_serial)
+		isalive, settop_serial)
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1604,7 +1609,7 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	if payloadStr == "0" {
 		broker_mutex.Lock()
 		defer broker_mutex.Unlock()
-		log.Println("e1: ", mac)
+		// log.Println("e1: ", mac)
 		query = fmt.Sprintf(`
 				UPDATE sensor SET
 					status = '%s'

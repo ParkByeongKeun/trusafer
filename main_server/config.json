@@ -41,5 +41,9 @@
       },
       "encryption": {
         "passphrase": "passphrase"
-      }
+      },
+      "broker": {
+        "user_id": "ijoon",
+        "user_password": "vXH5iVMqTfXB"
+    }
 }

@@ -874,6 +874,12 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 		in.Settop.GetRoom(), in.Settop.GetFloor(), in.Settop.GetRegisteredTime())
 	var uuid = uuid.New()
 	response := &pb.CreateSettopResponse{}
+	isalive := 0
+	if !in.Settop.GetIsAlive() {
+		isalive = 0
+	} else {
+		isalive = 1
+	}
 	query := fmt.Sprintf(`
 		INSERT INTO settop SET
 			uuid = '%s', 
@@ -889,7 +895,7 @@ func (s *server) CreateSettop(ctx context.Context, in *pb.CreateSettopRequest) (
 		`,
 		uuid.String(), in.Settop.GetPlaceUuid(), in.Settop.GetSerial(),
 		in.Settop.GetRoom(), in.Settop.GetFloor(), in.Settop.GetMac1(),
-		in.Settop.GetMac2(), boolToInt(in.Settop.GetIsAlive()), in.Settop.GetFwVersion(), in.Settop.GetRegisteredTime())
+		in.Settop.GetMac2(), isalive, in.Settop.GetFwVersion(), in.Settop.GetRegisteredTime())
 	sqlAddRegisterer, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -981,6 +987,12 @@ func (s *server) UpdateSettop(ctx context.Context, in *pb.UpdateSettopRequest) (
 		}
 	}
 	log.Printf("Received UpdateSettop: %s", in.Settop.GetUuid())
+	isalive := 0
+	if !in.Settop.GetIsAlive() {
+		isalive = 0
+	} else {
+		isalive = 1
+	}
 	query := fmt.Sprintf(`
 		UPDATE settop SET
 			place_uuid = '%s', 
@@ -996,7 +1008,7 @@ func (s *server) UpdateSettop(ctx context.Context, in *pb.UpdateSettopRequest) (
 		`,
 		in.Settop.GetPlaceUuid(), in.Settop.GetSerial(),
 		in.Settop.GetRoom(), in.Settop.GetFloor(), in.Settop.GetMac1(), in.Settop.GetMac2(),
-		boolToInt(in.Settop.GetIsAlive()), in.Settop.GetFwVersion(), in.Settop.GetRegisteredTime(), in.Settop.GetUuid())
+		isalive, in.Settop.GetFwVersion(), in.Settop.GetRegisteredTime(), in.Settop.GetUuid())
 	sqlUpdateSettop, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)

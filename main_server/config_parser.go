@@ -52,6 +52,10 @@ type Config struct {
 	Encryption struct {
 		Passphrase string `json:"passphrase"`
 	} `json:"encryption"`
+	Broker struct {
+		UserId       string `json:"user_id"`
+		UserPassword string `json:"user_password"`
+	} `json:"broker"`
 }
 
 func LoadConfiguration(file string) error {
