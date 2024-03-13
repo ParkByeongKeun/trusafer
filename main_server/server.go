@@ -1333,7 +1333,7 @@ func subscribeHandler(client mqtt.Client, topic string) {
 			handleDeregistSensor(client, parts)
 
 		case strings.HasPrefix(topic, base_topic+"/data/frame/"):
-			handleFrameData(client, parts, msg.Payload(), msg)
+			handleFrameData(client, parts, msg)
 
 		case strings.HasPrefix(topic, base_topic+"/data/connection/"):
 			handleConnectionData(client, parts, payloadStr)
@@ -1650,7 +1650,7 @@ func initThreshold9Data(sensor_uuid string) {
 
 var frameMutex sync.Mutex
 
-func handleFrameData(client mqtt.Client, parts []string, payload []byte, msg mqtt.Message) {
+func handleFrameData(client mqtt.Client, parts []string, msg mqtt.Message) {
 	frameMutex.Lock()
 	defer frameMutex.Unlock()
 	basePath := "storage_data/"
