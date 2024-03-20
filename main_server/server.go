@@ -228,21 +228,27 @@ func main() {
 	})
 	opts1.SetOnConnectHandler(func(c mqtt.Client) {
 		println("mqtt connected!")
-		var wg sync.WaitGroup
-		startSubscriber := func(client mqtt.Client, topic string) {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				subscribeHandler(client, topic)
-			}()
+
+		if token := client.Connect(); token.Wait() && token.Error() != nil {
+			panic(token.Error())
 		}
-		startSubscriber(client, base_topic+"/get/settop_sn/#")
-		startSubscriber(client, base_topic+"/regist/sensor/#")
-		startSubscriber(client, base_topic+"/deregist/sensor/#")
-		startSubscriber(client, base_topic+"/data/frame/#")
-		startSubscriber(client, base_topic+"/data/connection/#")
-		startSubscriber(client, base_topic+"/data/status/#")
-		startSubscriber(client, base_topic+"/data/info/#")
+
+		go func() {
+			for msg := range messageCh {
+				handleMessage(client, msg)
+			}
+		}()
+
+		var wg sync.WaitGroup
+
+		startSubscriber(client, base_topic+"/get/settop_sn/#", &wg)
+		startSubscriber(client, base_topic+"/regist/sensor/#", &wg)
+		startSubscriber(client, base_topic+"/deregist/sensor/#", &wg)
+		startSubscriber(client, base_topic+"/data/frame/#", &wg)
+		startSubscriber(client, base_topic+"/data/connection/#", &wg)
+		startSubscriber(client, base_topic+"/data/status/#", &wg)
+		startSubscriber(client, base_topic+"/data/info/#", &wg)
+
 		wg.Wait()
 	})
 	//file_ delete
@@ -531,8 +537,6 @@ func duplicateCheckMessage(status string, serial string) bool {
 var pubMutex sync.Mutex
 
 func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
-	pubMutex.Lock()
-	defer pubMutex.Unlock()
 	mGroupUUIDs = make(map[string][]string)
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
@@ -623,12 +627,14 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					"settop_uuid": settop_uuid,
 				}
 				frameJSON, _ := json.Marshal(j_frame)
-				isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
-				if isCheck {
-					return nil
-				}
+				// isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
+				// if isCheck {
+				// 	return nil
+				// }
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
+				pubMutex.Unlock()
 			} else { // alarm delay is added
 				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			}
@@ -637,13 +643,7 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		switch mImageStatus[sensor_serial] {
 		case "normal":
 			if mStatus[sensor_serial] != "normal" {
-
 				mStatus[sensor_serial] = "normal"
-
-				if mStatus[sensor_serial] == "" {
-					return nil
-				}
-
 				var settop_uuid string
 				var group_uuid string
 				var sensor_uuid string
@@ -703,6 +703,7 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 						log.Println(err)
 					}
 				}
+
 				j_frame := map[string]interface{}{
 					"status":      mImageStatus[sensor_serial],
 					"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -711,12 +712,14 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					"settop_uuid": settop_uuid,
 				}
 				frameJSON, _ := json.Marshal(j_frame)
-				isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
-				if isCheck {
-					return nil
-				}
+				// isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
+				// if isCheck {
+				// 	return nil
+				// }
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
+				pubMutex.Unlock()
 			} else {
 
 			}
@@ -724,10 +727,10 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		case "warning":
 			fallthrough
 		case "danger":
-			if mStatus[sensor_serial] == "" {
-				mStatus[sensor_serial] = mImageStatus[sensor_serial]
-				return nil
-			}
+			// if mStatus[sensor_serial] == "" {
+			// 	mStatus[sensor_serial] = mImageStatus[sensor_serial]
+			// 	return nil
+			// }
 			mStatus[sensor_serial] = mImageStatus[sensor_serial]
 			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			var settop_uuid string
@@ -788,7 +791,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					log.Println(err)
 				}
 			}
-
 			j_frame := map[string]interface{}{
 				"status":      mImageStatus[sensor_serial],
 				"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -802,7 +804,9 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				return nil
 			}
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+			pubMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
+			pubMutex.Unlock()
 			break
 		}
 	}
@@ -988,6 +992,9 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 		return thresholds
 	}
 }
+
+var saveMutex sync.Mutex
+
 func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_serial string) error {
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(data, &j_frame)
@@ -996,7 +1003,9 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 		return err
 	}
 	imgData, _ := base64.StdEncoding.DecodeString(j_frame["raw"].(string))
-	go publishStatus(imgData, settop_serial, mac, sensor_serial)
+	saveMutex.Lock()
+	publishStatus(imgData, settop_serial, mac, sensor_serial)
+	saveMutex.Unlock()
 	err = saveRawToFile(filePath, imgData)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
@@ -1091,9 +1100,6 @@ func containsSensorDataColumns(columns []string) bool {
 	return false
 }
 
-var sensorMutex sync.Mutex
-var folderMutex sync.Mutex
-
 func deleteOldImages(basePath string) {
 	ticker := time.NewTicker(1 * 24 * time.Hour) // 24시간마다 실행
 	// ticker := time.NewTicker(10 * time.Second) //test
@@ -1105,8 +1111,6 @@ func deleteOldImages(basePath string) {
 			resultChannel := make(chan error, len(sensorNames))
 			for _, sensorName := range sensorNames {
 				go func(sensor string) {
-					sensorMutex.Lock()
-					defer sensorMutex.Unlock()
 					resultChannel <- deleteOldDataWithTransaction(db, sensor)
 				}(sensorName)
 			}
@@ -1125,8 +1129,6 @@ func deleteOldImages(basePath string) {
 			resultFolderChannel := make(chan error, len(folders))
 			for _, folder := range folders {
 				go func(folderPath string) {
-					folderMutex.Lock()
-					defer folderMutex.Unlock()
 					resultFolderChannel <- deleteOldImagesInFolder(filepath.Join(basePath, folderPath))
 				}(folder)
 			}
@@ -1289,13 +1291,8 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 	return message
 }
 
-var logMutex sync.Mutex
-
 func serverLog(place string, floor string, room string, sensor_name string, sensor_serial string, type_ int) {
 	formattedTime := time.Now().Format("2006-01-02 15:04:05")
-	logMutex.Lock()
-	defer logMutex.Unlock()
-
 	query := fmt.Sprintf(`
 		INSERT INTO log_ SET
 			place = '%s', 
@@ -1314,44 +1311,51 @@ func serverLog(place string, floor string, room string, sensor_name string, sens
 	defer sqlAddRegisterer.Close()
 }
 
-func subscribeHandler(client mqtt.Client, topic string) {
-	mu.Lock()
-	defer mu.Unlock()
-	if token := client.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
-		payloadStr := string(msg.Payload())
-		parts := strings.Split(msg.Topic(), "/")
-		logger.Title.Printf(topic)
+var messageCh = make(chan mqtt.Message, 1000)
 
-		switch {
-		case strings.HasPrefix(topic, base_topic+"/get/settop_sn/"):
-			handleGetSettop_SN(client, parts, payloadStr)
-
-		case strings.HasPrefix(topic, base_topic+"/regist/sensor/"):
-			handleRegistSensor(client, parts, payloadStr)
-
-		case strings.HasPrefix(topic, base_topic+"/deregist/sensor/"):
-			handleDeregistSensor(client, parts)
-
-		case strings.HasPrefix(topic, base_topic+"/data/frame/"):
-			handleFrameData(client, parts, msg)
-
-		case strings.HasPrefix(topic, base_topic+"/data/connection/"):
-			handleConnectionData(client, parts, payloadStr)
-
-		case strings.HasPrefix(topic, base_topic+"/data/status/"):
-			handleStatusData(client, parts, payloadStr, msg)
-
-		case strings.HasPrefix(topic, base_topic+"/data/info/"):
-			handleInfoData(client, parts, payloadStr, msg)
+func startSubscriber(client mqtt.Client, topic string, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if token := client.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
+			messageCh <- msg
+		}); token.WaitTimeout(5*time.Second) && token.Error() != nil {
+			fmt.Println(token.Error())
 		}
-	}); token.WaitTimeout(5*time.Second) && token.Error() != nil {
-		fmt.Println(token.Error())
+	}()
+}
+
+func handleMessage(client mqtt.Client, msg mqtt.Message) {
+	payloadStr := string(msg.Payload())
+	parts := strings.Split(msg.Topic(), "/")
+
+	switch {
+	case strings.HasPrefix(msg.Topic(), base_topic+"/get/settop_sn/"):
+		handleGetSettop_SN(client, parts, payloadStr)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/regist/sensor/"):
+		handleRegistSensor(client, parts, payloadStr)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/deregist/sensor/"):
+		handleDeregistSensor(client, parts)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/data/frame/"):
+		handleFrameData(client, parts, msg)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/data/connection/"):
+		handleConnectionData(client, parts, payloadStr)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/data/status/"):
+		handleStatusData(client, parts, payloadStr, msg)
+
+	case strings.HasPrefix(msg.Topic(), base_topic+"/data/info/"):
+		handleInfoData(client, parts, payloadStr, msg)
 	}
 }
 
+var getMutex sync.RWMutex
+
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
-	broker_mutex.Lock()
-	defer broker_mutex.Unlock()
 
 	var settop_serial string
 	mac := parts[3]
@@ -1383,7 +1387,9 @@ func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
 	set_topic := base_topic + "/data/settop_sn/" + mac
 	message := settop_serial
 	log.Println(settop_serial)
+	getMutex.Lock()
 	client.Publish(set_topic, 1, false, message)
+	getMutex.Unlock()
 }
 
 func createSensorDataTable(db *sql.DB, tableName string) error {
@@ -1409,9 +1415,6 @@ func createSensorDataTable(db *sql.DB, tableName string) error {
 var registMutex sync.Mutex
 
 func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
-	registMutex.Lock()
-	defer registMutex.Unlock()
-
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var settop_uuid string
@@ -1520,35 +1523,60 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 1)
 	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
 	message := "info"
+	registMutex.Lock()
 	client.Publish(set_topic, 1, false, message)
-}
+	registMutex.Unlock()
 
-var deRegistMutex sync.Mutex
+	// if mStatus[sensorSerial] == "normal" {
+	// 	return
+	// }
+	var group_uuid string
+	query2 := fmt.Sprintf(`
+		SELECT group_uuid
+		FROM group_gateway
+		WHERE settop_uuid = '%s'
+	`, settop_uuid)
 
-func handleDeregistSensor(client mqtt.Client, parts []string) {
-	deRegistMutex.Lock()
-	defer deRegistMutex.Unlock()
-
-	sensorSerial := parts[5]
-	settopSerial := parts[3]
-	log.Println("handleDeregistSensor called: ", sensorSerial)
-	query := fmt.Sprintf(`
-		UPDATE sensor SET
-			status = '%s'
-		WHERE serial = '%s'
-		`,
-		"3", sensorSerial)
-
-	_, err := db.Exec(query)
+	rows2, err := db.Query(query2)
 	if err != nil {
 		log.Println(err)
 	}
+	defer rows2.Close()
+	for rows2.Next() {
+		err := rows2.Scan(&group_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+		mGroupUUIDs[sensorSerial] = append(mGroupUUIDs[sensorSerial], group_uuid)
+	}
+
+	set_topic = base_topic + "/data/status/" + settop_serial + "/" + settopMac + "/" + sensorSerial
+	j_frame := map[string]interface{}{
+		"status":      "normal",
+		"group_uuid":  mGroupUUIDs[sensorSerial],
+		"sensor_name": sensor_name,
+		"sensor_uuid": get_sensor_uuid,
+		"settop_uuid": settop_uuid,
+	}
+	frameJSON, _ := json.Marshal(j_frame)
+	connectionMutex.Lock()
+	client.Publish(set_topic, 1, false, frameJSON)
+	connectionMutex.Unlock()
+	mStatus[sensorSerial] = "normal"
+}
+
+func handleDeregistSensor(client mqtt.Client, parts []string) {
+	sensorSerial := parts[5]
+	settopSerial := parts[3]
+	settopMac := parts[4]
+	log.Println("handleDeregistSensor called: ", sensorSerial)
+
 	mainListMapping = NewMainListResponseMapping()
 	var place_uuid string
 	var place_name string
 	var floor string
 	var room string
-	query = fmt.Sprintf(`
+	query := fmt.Sprintf(`
 		SELECT place_uuid, floor, room  
 		FROM settop 
 		WHERE serial = '%s' 
@@ -1587,26 +1615,64 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 	}
 
 	var sensor_name string
+	var group_uuid string
+	var sensor_uuid string
+	var settop_uuid string
 
 	query = fmt.Sprintf(`
-			SELECT name 
-			FROM sensor 
-			WHERE serial = '%s'
-		`,
-		sensorSerial)
+				SELECT uuid, name, settop_uuid
+				FROM sensor
+				WHERE serial = '%s'
+			`, sensorSerial)
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
-
 	defer rows.Close()
 	for rows.Next() {
-		err := rows.Scan(&sensor_name)
+		err := rows.Scan(&sensor_uuid, &sensor_name, &settop_uuid)
 		if err != nil {
 			log.Println(err)
 		}
+
+		query2 := fmt.Sprintf(`
+						SELECT group_uuid
+						FROM group_gateway
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
+
+		rows2, err := db.Query(query2)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			err := rows2.Scan(&group_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+			mGroupUUIDs[sensorSerial] = append(mGroupUUIDs[sensorSerial], group_uuid)
+		}
+		isCheck := duplicateCheckMessage("inspection", sensorSerial)
+		if isCheck {
+			continue
+		}
+		set_topic := base_topic + "/data/status/" + settopSerial + "/" + settopMac + "/" + sensorSerial
+		j_frame := map[string]interface{}{
+			"status":      "inspection",
+			"group_uuid":  mGroupUUIDs[sensorSerial],
+			"sensor_name": sensor_name,
+			"sensor_uuid": sensor_uuid,
+			"settop_uuid": settop_uuid,
+		}
+		frameJSON, _ := json.Marshal(j_frame)
+		connectionMutex.Lock()
+		client.Publish(set_topic, 1, false, frameJSON)
+		connectionMutex.Unlock()
 	}
+	mImageStatus[sensorSerial] = "inspection"
 	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
+
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1651,10 +1717,10 @@ func initThreshold9Data(sensor_uuid string) {
 var frameMutex sync.Mutex
 
 func handleFrameData(client mqtt.Client, parts []string, msg mqtt.Message) {
-	frameMutex.Lock()
-	defer frameMutex.Unlock()
 	basePath := "storage_data/"
+	frameMutex.Lock()
 	processMqttMessage(msg, basePath)
+	frameMutex.Unlock()
 	var decodedData map[string]interface{}
 	err := json.Unmarshal(msg.Payload(), &decodedData)
 	if err != nil {
@@ -1664,12 +1730,9 @@ func handleFrameData(client mqtt.Client, parts []string, msg mqtt.Message) {
 	}
 }
 
-var connectionMutex sync.Mutex
+var connectionMutex sync.RWMutex
 
 func handleConnectionData(client mqtt.Client, parts []string, payloadStr string) {
-	connectionMutex.Lock()
-	defer connectionMutex.Unlock()
-
 	settop_serial := parts[3]
 	mac := parts[4]
 	isalive := "0"
@@ -1688,7 +1751,10 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 	if err != nil {
 		log.Println(err)
 	}
+	var status = ""
 	if payloadStr == "0" {
+		status = "inspection"
+
 		var settop_uuid string
 		var group_uuid string
 		var sensor_uuid string
@@ -1696,10 +1762,10 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 		var sensor_serial string
 
 		query = fmt.Sprintf(`
-				SELECT uuid, name, serial, settop_uuid 
-				FROM sensor 
-				WHERE mac = '%s'
-			`, mac)
+		SELECT uuid, name, serial, settop_uuid
+		FROM sensor
+		WHERE mac = '%s'
+	`, mac)
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -1712,10 +1778,10 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 			}
 
 			query2 := fmt.Sprintf(`
-						SELECT group_uuid 
-						FROM group_gateway 
-						WHERE settop_uuid = '%s'
-					`, settop_uuid)
+				SELECT group_uuid
+				FROM group_gateway
+				WHERE settop_uuid = '%s'
+			`, settop_uuid)
 
 			rows2, err := db.Query(query2)
 			if err != nil {
@@ -1729,76 +1795,200 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 				}
 				mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 			}
-			isCheck := duplicateCheckMessage("inspection", sensor_serial)
+			isCheck := duplicateCheckMessage(status, sensor_serial)
 			if isCheck {
 				continue
 			}
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			j_frame := map[string]interface{}{
-				"status":      "inspection",
+				"status":      status,
 				"group_uuid":  mGroupUUIDs[sensor_serial],
 				"sensor_name": sensor_name,
 				"sensor_uuid": sensor_uuid,
 				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
+			connectionMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
-		}
-	} else {
-		var checkStatus string
-		var checkSerial string
-		query := fmt.Sprintf(`
-			SELECT status, serial 
-			FROM sensor 
-			WHERE mac = '%s'
-		`,
-			mac)
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&checkStatus, &checkSerial)
-			if err != nil {
-				log.Println(err)
-			}
-			if checkStatus == "3" {
-				mEventEndTimes[checkSerial] = 0
-				mStatus[checkSerial] = ""
-				mImageStatus[checkSerial] = ""
-			}
+			connectionMutex.Unlock()
+			mainListMapping = NewMainListResponseMapping()
+			mImageStatus[sensor_serial] = status
 		}
 	}
-	mainListMapping = NewMainListResponseMapping()
+	// else {
+	// 	var checkStatus string
+	// 	var checkSerial string
+	// 	status = "normal"
+	// 	query := fmt.Sprintf(`
+	// 		SELECT status, serial
+	// 		FROM sensor
+	// 		WHERE mac = '%s'
+	// 	`,
+	// 		mac)
+	// 	rows, err := db.Query(query)
+	// 	if err != nil {
+	// 		log.Println(err)
+	// 	}
+
+	// 	defer rows.Close()
+	// 	for rows.Next() {
+	// 		err := rows.Scan(&checkStatus, &checkSerial)
+	// 		if err != nil {
+	// 			log.Println(err)
+	// 		}
+	// 		if checkStatus == "3" {
+	// 			mEventEndTimes[checkSerial] = 0
+	// 			mStatus[checkSerial] = ""
+	// 			mImageStatus[checkSerial] = ""
+	// 		}
+	// 	}
+	// }
 }
 
 var statusMutex sync.Mutex
 
 func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
-	statusMutex.Lock()
-	defer statusMutex.Unlock()
 	mGroupUUIDs = make(map[string][]string)
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
-	mac := parts[4]
+	// mac := parts[4]
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	var status string
 	if err != nil { //sensor publish <<=
 		status = string(msg.Payload())
-		if status == "inspection" {
-			log.Println("inspection called")
-			var settop_uuid string
-			var group_uuid string
-			var sensor_uuid string
+		// if status == "inspection" {
+		// 	log.Println("inspection called")
+		// 	var settop_uuid string
+		// 	var group_uuid string
+		// 	var sensor_uuid string
+		// 	var sensor_name string
+		// 	query := fmt.Sprintf(`
+		// 			SELECT uuid
+		// 			FROM settop
+		// 			WHERE serial = '%s'
+		// 		`, settop_serial)
+		// 	rows1, err := db.Query(query)
+		// 	if err != nil {
+		// 		log.Println(err)
+		// 	}
+		// 	defer rows1.Close()
+		// 	for rows1.Next() {
+		// 		err := rows1.Scan(&settop_uuid)
+		// 		if err != nil {
+		// 			log.Println(err)
+		// 		}
+		// 		query2 := fmt.Sprintf(`
+		// 				SELECT group_uuid
+		// 				FROM group_gateway
+		// 				WHERE settop_uuid = '%s'
+		// 			`, settop_uuid)
+
+		// 		rows2, err := db.Query(query2)
+		// 		if err != nil {
+		// 			log.Println(err)
+		// 		}
+		// 		defer rows2.Close()
+		// 		for rows2.Next() {
+		// 			err := rows2.Scan(&group_uuid)
+		// 			if err != nil {
+		// 				log.Println(err)
+		// 			}
+		// 			mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+		// 		}
+		// 	}
+		// 	query = fmt.Sprintf(`
+		// 		SELECT uuid, name
+		// 		FROM sensor
+		// 		WHERE serial = '%s'
+		// 	`, sensor_serial)
+		// 	rows, err := db.Query(query)
+		// 	if err != nil {
+		// 		log.Println(err)
+		// 	}
+		// 	defer rows.Close()
+		// 	for rows.Next() {
+		// 		err := rows.Scan(&sensor_uuid, &sensor_name)
+		// 		if err != nil {
+		// 			log.Println(err)
+		// 		}
+		// 	}
+		// 	isCheck := duplicateCheckMessage(status, sensor_serial)
+		// 	if isCheck {
+		// 		return
+		// 	}
+		// 	set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
+		// 	j_frame := map[string]interface{}{
+		// 		"status":      "inspection",
+		// 		"group_uuid":  mGroupUUIDs[sensor_serial],
+		// 		"sensor_name": sensor_name,
+		// 		"sensor_uuid": sensor_uuid,
+		// 		"settop_uuid": settop_uuid,
+		// 	}
+		// 	frameJSON, _ := json.Marshal(j_frame)
+		// 	statusMutex.Lock()
+		// 	client.Publish(set_topic, 1, false, frameJSON)
+		// 	statusMutex.Unlock()
+		// 	return
+		// }
+	} else {
+		status, _ = j_frame["status"].(string)
+
+		var result = -1
+		if string(status) == "normal" {
+			result = 0
+		} else if string(status) == "warning" {
+			result = 1
+		} else if string(status) == "danger" {
+			result = 2
+		} else if string(status) == "inspection" {
+			result = 3
+		}
+		mImageStatus[sensor_serial] = string(status)
+		if result >= 0 {
 			var sensor_name string
 			query := fmt.Sprintf(`
-					SELECT uuid 
-					FROM settop 
-					WHERE serial = '%s'
-				`, settop_serial)
+				SELECT name 
+				FROM sensor 
+				WHERE serial = '%s'
+			`, sensor_serial)
+
+			rows, err := db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&sensor_name)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+
+			sensorSerial := parts[5]
+			isCheck := duplicateCheckMessage(string(status), sensorSerial)
+			if isCheck {
+				return
+			}
+			query1 := fmt.Sprintf(`
+		UPDATE sensor SET
+			status = '%s'
+		WHERE serial = '%s'
+		`,
+				strconv.Itoa(result), sensorSerial)
+			_, err = db.Exec(query1)
+			if err != nil {
+				log.Println(err)
+			}
+			message := eventMessage(settop_serial, result, sensor_name, sensor_serial)
+			var settop_uuid string
+			var group_uuid string
+			query = fmt.Sprintf(`
+			SELECT uuid 
+			FROM settop 
+			WHERE serial = '%s'
+		`, settop_serial)
+
 			rows1, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -1809,174 +1999,55 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				if err != nil {
 					log.Println(err)
 				}
+
 				query2 := fmt.Sprintf(`
-						SELECT group_uuid 
-						FROM group_gateway 
-						WHERE settop_uuid = '%s'
-					`, settop_uuid)
+					SELECT group_uuid 
+					FROM group_gateway 
+					WHERE settop_uuid = '%s'
+				`, settop_uuid)
 
 				rows2, err := db.Query(query2)
 				if err != nil {
 					log.Println(err)
 				}
 				defer rows2.Close()
+
 				for rows2.Next() {
 					err := rows2.Scan(&group_uuid)
 					if err != nil {
 						log.Println(err)
 					}
-					mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
+					statusMutex.Lock()
+					SendMessageHandler("Trusafer", message, "style", group_uuid)
+					statusMutex.Unlock()
 				}
 			}
+			var group_master_uuid string
 			query = fmt.Sprintf(`
-				SELECT uuid, name 
-				FROM sensor 
-				WHERE serial = '%s'
-			`, sensor_serial)
-			rows, err := db.Query(query)
+			SELECT uuid 
+			FROM group_ 
+			WHERE name = 'master'
+		`)
+			rows, err = db.Query(query)
 			if err != nil {
 				log.Println(err)
 			}
 			defer rows.Close()
 			for rows.Next() {
-				err := rows.Scan(&sensor_uuid, &sensor_name)
+				err := rows.Scan(&group_master_uuid)
 				if err != nil {
 					log.Println(err)
 				}
 			}
-			isCheck := duplicateCheckMessage(status, sensor_serial)
-			if isCheck {
-				return
-			}
-			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-			j_frame := map[string]interface{}{
-				"status":      "inspection",
-				"group_uuid":  mGroupUUIDs[sensor_serial],
-				"sensor_name": sensor_name,
-				"sensor_uuid": sensor_uuid,
-				"settop_uuid": settop_uuid,
-			}
-			frameJSON, _ := json.Marshal(j_frame)
-			client.Publish(set_topic, 1, false, frameJSON)
-			return
+			statusMutex.Lock()
+			SendMessageHandler("Trusafer", message, "style", group_master_uuid)
+			statusMutex.Unlock()
+			mainListMapping = NewMainListResponseMapping()
 		}
-	} else {
-		status, _ = j_frame["status"].(string)
-	}
-
-	var result = -1
-	if string(status) == "normal" {
-		result = 0
-	} else if string(status) == "warning" {
-		result = 1
-	} else if string(status) == "danger" {
-		result = 2
-	} else if string(status) == "inspection" {
-		result = 3
-	}
-	if result >= 0 {
-		var sensor_name string
-		query := fmt.Sprintf(`
-				SELECT name 
-				FROM sensor 
-				WHERE serial = '%s'
-			`, sensor_serial)
-
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&sensor_name)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-
-		sensorSerial := parts[5]
-		isCheck := duplicateCheckMessage(string(status), sensorSerial)
-		if isCheck {
-			return
-		}
-		query1 := fmt.Sprintf(`
-		UPDATE sensor SET
-			status = '%s'
-		WHERE serial = '%s'
-		`,
-			strconv.Itoa(result), sensorSerial)
-		_, err = db.Exec(query1)
-		if err != nil {
-			log.Println(err)
-		}
-		message := eventMessage(settop_serial, result, sensor_name, sensor_serial)
-		var settop_uuid string
-		var group_uuid string
-		query = fmt.Sprintf(`
-			SELECT uuid 
-			FROM settop 
-			WHERE serial = '%s'
-		`, settop_serial)
-
-		rows1, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows1.Close()
-		for rows1.Next() {
-			err := rows1.Scan(&settop_uuid)
-			if err != nil {
-				log.Println(err)
-			}
-
-			query2 := fmt.Sprintf(`
-					SELECT group_uuid 
-					FROM group_gateway 
-					WHERE settop_uuid = '%s'
-				`, settop_uuid)
-
-			rows2, err := db.Query(query2)
-			if err != nil {
-				log.Println(err)
-			}
-			defer rows2.Close()
-
-			for rows2.Next() {
-				err := rows2.Scan(&group_uuid)
-				if err != nil {
-					log.Println(err)
-				}
-				SendMessageHandler("Trusafer", message, "style", group_uuid)
-			}
-		}
-		var group_master_uuid string
-		query = fmt.Sprintf(`
-			SELECT uuid 
-			FROM group_ 
-			WHERE name = 'master'
-		`)
-		rows, err = db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&group_master_uuid)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-		SendMessageHandler("Trusafer", message, "style", group_master_uuid)
-		mainListMapping = NewMainListResponseMapping()
 	}
 }
 
-var infoMutex sync.Mutex
-
 func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg mqtt.Message) {
-	infoMutex.Lock()
-	defer infoMutex.Unlock()
-
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
