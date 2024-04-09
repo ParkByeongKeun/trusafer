@@ -44,6 +44,8 @@ import (
 
 	"firebase.google.com/go/v4/messaging"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"github.com/influxdata/influxdb-client-go/v2/api/write"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 
@@ -168,6 +170,7 @@ func initApp() {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	initApp()
+
 	// conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
 	conf_file := flag.String("config", "/trusafer/config.json", "config file path")
 	flag.Parse()
@@ -175,6 +178,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Connect to influxdb
+	_influxdb_client = influxdb2.NewClient(Conf.InfluxDB.Address, Conf.InfluxDB.Token)
+	_writeAPI = _influxdb_client.WriteAPIBlocking(Conf.InfluxDB.Org, Conf.InfluxDB.Bucket)
+	_queryAPI = _influxdb_client.QueryAPI(Conf.InfluxDB.Org)
+	defer _influxdb_client.Close()
+
 	logFilePath := filepath.Join(Conf.Log.Dir, Conf.Log.File)
 	lbj := &lumberjack.Logger{
 		Filename:   logFilePath,
@@ -1006,7 +1016,7 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 	saveMutex.Lock()
 	publishStatus(imgData, settop_serial, mac, sensor_serial)
 	saveMutex.Unlock()
-	err = saveRawToFile(filePath, imgData)
+	err = saveRawToFile(sensor_serial, imgData)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
 		return nil
@@ -1014,16 +1024,17 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 	return nil
 }
 
-func saveRawToFile(filePath string, rawData []byte) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+func saveRawToFile(sensor_serial string, rawData []byte) error {
+	encodedData := base64.StdEncoding.EncodeToString(rawData)
+	fields := map[string]interface{}{
+		"data": encodedData,
 	}
-	defer file.Close()
-	_, err = file.Write(rawData)
-	if err != nil {
-		return err
+	getMutex.Lock()
+	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
+	if err := _writeAPI.WritePoint(context.Background(), point); err != nil {
+		log.Fatal(err)
 	}
+	getMutex.Unlock()
 	return nil
 }
 
@@ -1101,44 +1112,41 @@ func containsSensorDataColumns(columns []string) bool {
 }
 
 func deleteOldImages(basePath string) {
-	ticker := time.NewTicker(1 * 24 * time.Hour) // 24시간마다 실행
-	// ticker := time.NewTicker(10 * time.Second) //test
+	loc, _ := time.LoadLocation("Asia/Seoul")
 	for {
-		select {
-		case <-ticker.C:
-			// history 삭제 (7일 보관)==
-			sensorNames, err := getSensorDataTables(db)
-			resultChannel := make(chan error, len(sensorNames))
-			for _, sensorName := range sensorNames {
-				go func(sensor string) {
-					resultChannel <- deleteOldDataWithTransaction(db, sensor)
-				}(sensorName)
-			}
-			for i := 0; i < len(sensorNames); i++ {
-				err := <-resultChannel
-				if err != nil {
+		now := time.Now().In(loc)
+		nextRun := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 0, 0, loc)
+		if now.After(nextRun) {
+			nextRun = nextRun.AddDate(0, 0, 1)
+		}
+		duration := nextRun.Sub(now)
+		timer := time.NewTimer(duration)
+
+		<-timer.C
+		sensorNames, err := getSensorDataTables(db)
+		if err != nil {
+			log.Println("Error getting sensor data tables:", err)
+			continue
+		}
+		for _, sensorName := range sensorNames {
+			go func(sensor string) {
+				if err := deleteOldDataWithTransaction(db, sensor); err != nil {
 					log.Println("Error deleting old data:", err)
 				}
-			}
-			close(resultChannel)
-			folders, err := getFolders(basePath)
-			if err != nil {
-				log.Println("Error getting folders:", err)
-				continue
-			}
-			resultFolderChannel := make(chan error, len(folders))
-			for _, folder := range folders {
-				go func(folderPath string) {
-					resultFolderChannel <- deleteOldImagesInFolder(filepath.Join(basePath, folderPath))
-				}(folder)
-			}
-			for i := 0; i < len(folders); i++ {
-				err := <-resultFolderChannel
-				if err != nil {
+			}(sensorName)
+		}
+
+		folders, err := getFolders(basePath)
+		if err != nil {
+			log.Println("Error getting folders:", err)
+			continue
+		}
+		for _, folder := range folders {
+			go func(folderPath string) {
+				if err := deleteOldImagesInFolder(filepath.Join(basePath, folderPath)); err != nil {
 					log.Println("Error deleting old images in folder:", err)
 				}
-			}
-			close(resultFolderChannel)
+			}(folder)
 		}
 	}
 }
@@ -1181,6 +1189,20 @@ func deleteOldDataWithTransaction(db *sql.DB, sensorSerial string) error {
 	return nil
 }
 
+func deleteFile(filePath string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	err := os.Remove(filePath)
+	if err != nil {
+		fmt.Printf("Error deleting file %s: %s\n", filePath, err)
+		return
+	}
+
+	fmt.Printf("File %s deleted successfully\n", filePath)
+}
+
+var wg sync.WaitGroup
+
 func deleteOldImagesInFolder(folderPath string) error {
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -1189,11 +1211,9 @@ func deleteOldImagesInFolder(folderPath string) error {
 		if !info.IsDir() {
 			if info.ModTime().Before(time.Now().Add(-7 * 24 * time.Hour)) {
 				// if info.ModTime().Before(time.Now().Add(-10 * time.Second)) {
-				err := os.Remove(path)
-				if err != nil {
-					return fmt.Errorf("error deleting file %s: %w", path, err)
-					fmt.Println("Error deleting file:", err)
-				}
+				wg.Add(1)
+				go deleteFile(path, &wg)
+
 			}
 		}
 		return nil
@@ -1527,9 +1547,9 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	client.Publish(set_topic, 1, false, message)
 	registMutex.Unlock()
 
-	// if mStatus[sensorSerial] == "normal" {
-	// 	return
-	// }
+	if mStatus[sensorSerial] == "normal" {
+		return
+	}
 	var group_uuid string
 	query2 := fmt.Sprintf(`
 		SELECT group_uuid
@@ -1668,10 +1688,10 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		frameJSON, _ := json.Marshal(j_frame)
 		connectionMutex.Lock()
 		client.Publish(set_topic, 1, false, frameJSON)
+		go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
 		connectionMutex.Unlock()
 	}
-	mImageStatus[sensorSerial] = "inspection"
-	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
+	// mImageStatus[sensorSerial] = "inspection"
 
 }
 
@@ -1942,6 +1962,10 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 		} else if string(status) == "danger" {
 			result = 2
 		} else if string(status) == "inspection" {
+			isCheck := duplicateCheckMessage("inspection", sensor_serial)
+			if isCheck {
+				return
+			}
 			result = 3
 		}
 		mImageStatus[sensor_serial] = string(status)

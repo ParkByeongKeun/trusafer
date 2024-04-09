@@ -5,11 +5,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"log"
 	"math"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -2422,34 +2419,41 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 	response := &pb.ImageChunk{}
 	sensorSerial := req.SensorSerial
 	date := req.Date
+	location, err := time.LoadLocation("Asia/Seoul")
 	requestTime, err := time.Parse("2006-01-02 15:04:05", date)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid date format: %v", err)
 	}
-	folderPath := filepath.Join("/trusafer/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
-	// folderPath := filepath.Join("/Users/bkpark/works/go/trusafer/main_server/storage_data", sensorSerial, requestTime.Format("2006-01-02"))
-	fileName := requestTime.Format("15:04:05") + ".raw"
-	filePath := filepath.Join(folderPath, fileName)
-	log.Println("stream image called: serial =", sensorSerial, "date =", date)
-	var encodedData string
-	imageFile, err := os.Open(filePath)
+	requestTime = requestTime.In(location).Add(-9 * time.Hour)
+	start := requestTime.Add(-1 * time.Second)
+	stop := requestTime.Add(1 * time.Second)
+	startRFC3339 := start.Format(time.RFC3339)
+	stopRFC3339 := stop.Format(time.RFC3339)
+
+	query := fmt.Sprintf(`from(bucket: "%s")
+    |> range(start: %s, stop: %s)
+    |> filter(fn: (r) => r._field != "%s")
+	|> filter(fn: (r) => r["_field"] == "data")
+    `,
+		Conf.InfluxDB.Bucket,
+		startRFC3339,
+		stopRFC3339,
+		sensorSerial)
+	results, err := _queryAPI.Query(context.Background(), query)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
-	defer imageFile.Close()
-	buffer := make([]byte, 1024*8)
-	for {
-		n, err := imageFile.Read(buffer)
-		if err == io.EOF {
-			break
+	var byteData string
+	for results.Next() {
+		if results.Record().Value() == nil {
+			continue
 		}
-		if err != nil {
-			log.Fatalf("Error reading image file: %v", err)
-			return nil, err
-		}
-		encodedData = base64.StdEncoding.EncodeToString(buffer[:n])
+		byteData = results.Record().Value().(string)
 	}
-	response.TempImage = encodedData
+	if byteData == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	}
+	response.TempImage = byteData
 	return response, nil
 }
 

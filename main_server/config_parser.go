@@ -39,6 +39,13 @@ type Config struct {
 		LocalTime  bool   `json:"local_time"`
 		Compress   bool   `json:"compress"`
 	} `json:"log"`
+	InfluxDB struct {
+		Org         string `json:"org"`
+		Bucket      string `json:"bucket"`
+		Address     string `json:"address"`
+		Token       string `json:"token"`
+		Measurement string `json:"measurement"`
+	} `json:"influxdb"`
 	Broker_address struct {
 		Address string `json:"address"`
 		Port    string `json:"port"`

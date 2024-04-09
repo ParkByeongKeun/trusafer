@@ -42,6 +42,15 @@
       "encryption": {
         "passphrase": "passphrase"
       },
+
+      "influxdb": {
+        "org": "trusafer",
+        "bucket": "images",
+        "address": "http://127.0.0.1:8086",
+        "token": "AagQegiMS9gO4T5YrGhj5Wbg_YNS20I4gAn7Xjm5xNg18mTK21ftUVBV7xhaL4Ne1x_xAZ_uSGKe-T3Xz0xOqw==",
+        "measurement": "names"
+      },
+
       "broker": {
         "user_id": "ijoon",
         "user_password": "vXH5iVMqTfXB"
