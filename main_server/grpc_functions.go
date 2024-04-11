@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1834,19 +1835,35 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequest) (*pb.ReadHistoryListResponse, error) {
 	log.Printf("Received GetHistoryList: called")
 	response := &pb.ReadHistoryListResponse{}
-	var min_temp float32
-	var max_temp float32
-	var date string
+	// var min_temp float32
+	// var max_temp float32
+	// var date string
 	query := ""
 	trim_interval := 1
+
+	prev_date := in.GetPrevDate()
+	next_date := in.GetNextDate()
+	location, err := time.LoadLocation("Asia/Seoul")
+	prevTime, err := time.Parse("2006-01-02 15:04:05", prev_date)
+	nextTime, err := time.Parse("2006-01-02 15:04:05", next_date)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid date format: %v", err)
+	}
+	prevTime = prevTime.In(location).Add(-9 * time.Hour)
+	nextTime = nextTime.In(location).Add(-9 * time.Hour)
+	startRFC3339 := prevTime.Format(time.RFC3339)
+	stopRFC3339 := nextTime.Format(time.RFC3339)
+
 	if in.GetInterval() < 10 {
-		query = fmt.Sprintf(`
-		SELECT min_temp, max_temp, date  
-		FROM %s 
-		where date >= '%s' AND date < '%s' 
-		ORDER by id desc 
-		LIMIT %d, %d
-	`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), in.GetCursor(), in.GetCount())
+		query = fmt.Sprintf(`from(bucket: "%s")
+		|> range(start: %s, stop: %s)
+		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._field != "image_data")
+		`,
+			Conf.InfluxDB.Bucket,
+			startRFC3339,
+			stopRFC3339,
+			in.GetSensorSerial())
 	} else if in.GetInterval() >= 10 && in.GetInterval() < 300 {
 		if in.GetInterval() >= 10 && in.GetInterval() < 20 {
 			trim_interval = 10
@@ -1855,14 +1872,18 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 		} else {
 			trim_interval = 60
 		}
-		query = fmt.Sprintf(`
-		SELECT min_temp, max_temp, date  
-		FROM %s 
-		where date >= '%s' AND date < '%s'
-		GROUP by DATE(date), HOUR(date), MINUTE(date), FLOOR(SECOND(date)/%d)
-		ORDER by id desc
-		LIMIT %d, %d
-	`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), trim_interval, in.GetCursor(), in.GetCount())
+
+		query = fmt.Sprintf(`from(bucket: "%s")
+		|> range(start: %s, stop: %s)
+		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._field != "image_data")
+		|> aggregateWindow(every: %ds, fn: max, createEmpty: false)
+		|> group(columns: ["_measurement", "_field"])
+		`,
+			Conf.InfluxDB.Bucket,
+			startRFC3339,
+			stopRFC3339,
+			in.GetSensorSerial(), trim_interval)
 	} else {
 		if in.GetInterval() >= (30*10) && in.GetInterval() < (60*20) {
 			trim_interval = 10
@@ -1871,34 +1892,55 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 		} else {
 			trim_interval = 60
 		}
-		query = fmt.Sprintf(`
-			SELECT min_temp, max_temp, date  
-			FROM %s 
-			where date >= '%s' AND date < '%s'
-			GROUP by DATE(date), HOUR(date), FLOOR(MINUTE(date)/%d)
-			ORDER by id desc
-			LIMIT %d, %d
-		`, in.GetSensorSerial(), in.GetPrevDate(), in.GetNextDate(), trim_interval, in.GetCursor(), in.GetCount())
+
+		query = fmt.Sprintf(`from(bucket: "%s")
+		|> range(start: %s, stop: %s)
+		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._field != "image_data")
+		|> aggregateWindow(every: %dm, fn: max, createEmpty: false)
+		|> group(columns: ["_measurement", "_field"])
+		`,
+			Conf.InfluxDB.Bucket,
+			startRFC3339,
+			stopRFC3339,
+			in.GetSensorSerial(), trim_interval)
 	}
-	rows, err := db.Query(query)
+
+	log.Println("query = ", query)
+	results, err := _queryAPI.Query(context.Background(), query)
 	if err != nil {
-		log.Println(err)
-		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-		return nil, err
+		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&min_temp, &max_temp, &date)
-		if err != nil {
-			log.Println(err)
-			return nil, status.Errorf(codes.Internal, "Failed to scan history list row: %v", err)
+	dataMap := make(map[int64]*pb.History)
+	// historyList := &pb.History{}
+	for results.Next() {
+		if results.Record().Value() == nil {
+			continue
 		}
-		historyList := &pb.History{}
-		historyList.MinTemp = min_temp
-		historyList.MaxTemp = max_temp
-		historyList.Date = date
-		response.HistoryList = append(response.HistoryList, historyList)
+
+		seconds := results.Record().Time().Unix()
+		if _, ok := dataMap[seconds]; !ok {
+			dataMap[seconds] = &pb.History{}
+		}
+		data := dataMap[seconds]
+		switch results.Record().Field() {
+		case "min_value":
+			data.MinTemp = float32(results.Record().Value().(float64))
+		case "max_value":
+			data.MaxTemp = float32(results.Record().Value().(float64))
+		}
+		t := time.Unix(seconds, 0)
+		formattedTime := t.Format("2006-01-02 15:04:05")
+		data.Date = formattedTime
 	}
+
+	for _, data := range dataMap {
+		response.HistoryList = append(response.HistoryList, data)
+	}
+	less := func(i, j int) bool {
+		return response.HistoryList[i].Date < response.HistoryList[j].Date
+	}
+	sort.Slice(response.HistoryList, less)
 	return response, nil
 }
 
@@ -2433,7 +2475,7 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 	query := fmt.Sprintf(`from(bucket: "%s")
     |> range(start: %s, stop: %s)
     |> filter(fn: (r) => r._field != "%s")
-	|> filter(fn: (r) => r["_field"] == "data")
+	|> filter(fn: (r) => r["_field"] == "image_data")
     `,
 		Conf.InfluxDB.Bucket,
 		startRFC3339,

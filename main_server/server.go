@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,38 +110,6 @@ var (
 	tokenList       []string
 )
 
-// sensor history data
-type HistoryData struct {
-	SensorSerial  string
-	MinValue      float64
-	MaxValue      float64
-	FormattedTime string
-}
-
-type SensorQueue struct {
-	queue []HistoryData
-	mu    sync.Mutex
-}
-
-func (q *SensorQueue) Enqueue(data HistoryData) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.queue = append(q.queue, data)
-
-}
-
-func (q *SensorQueue) DequeueAll() []HistoryData {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	dataCopy := make([]HistoryData, len(q.queue))
-	copy(dataCopy, q.queue)
-	q.queue = nil
-	return dataCopy
-}
-
-var queue = SensorQueue{}
-
 func accessibleRolesForAT() map[string][]string {
 	return map[string][]string{
 		"admin": {"read", "write", "delete"},
@@ -159,7 +126,6 @@ func accessibleRolesForRT() map[string][]string {
 
 // firebase init
 func initApp() {
-	// serviceAccountKeyPath := "./serviceAccountKey.json"
 	serviceAccountKeyPath := "/trusafer/serviceAccountKey.json"
 	_, err := firebaseutil.InitApp(serviceAccountKeyPath)
 	if err != nil {
@@ -171,7 +137,6 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	initApp()
 
-	// conf_file := flag.String("config", "/Users/bkpark/works/go/trusafer/main_server/config.json", "config file path")
 	conf_file := flag.String("config", "/trusafer/config.json", "config file path")
 	flag.Parse()
 	err := LoadConfiguration(*conf_file)
@@ -218,8 +183,6 @@ func main() {
 		log.Println(err.Error())
 	}
 	aesSecretKey = hash.Sum(nil)
-
-	// broker := "ssl://192.168.13.5:21984"
 	broker := "ssl://broker:1883"
 	mqtt_serial := RandomString(15)
 	base_topic = "trusafer"
@@ -261,9 +224,6 @@ func main() {
 
 		wg.Wait()
 	})
-	//file_ delete
-	basePath := "storage_data/"
-	go deleteOldImages(basePath)
 
 	client = mqtt.NewClient(opts1)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -329,28 +289,6 @@ func main() {
 		Addr:    gwPortString,
 		Handler: cors(gwmux),
 	}
-
-	go func() { //큐에 넣어서 센서데이터 batch insert하기 5초에 1번
-		for {
-			time.Sleep(5 * time.Second)
-			data := queue.DequeueAll()
-			if len(data) > 0 {
-				uniqueEntries := make(map[string]HistoryData)
-				for _, entry := range data {
-					key := entry.SensorSerial + entry.FormattedTime
-					uniqueEntries[key] = entry
-				}
-				uniqueData := make([]HistoryData, 0, len(uniqueEntries))
-				for _, value := range uniqueEntries {
-					uniqueData = append(uniqueData, value)
-				}
-				err := insertBatch(db, uniqueData)
-				if err != nil {
-					fmt.Println("Error:", err)
-				}
-			}
-		}
-	}()
 
 	go func() {
 		log.Printf("Serving gRPC-Gateway on " + gwPortString + " port")
@@ -535,8 +473,6 @@ func duplicateCheckMessage(status string, serial string) bool {
 			isCheck = true
 		}
 	}
-
-	// log.Println("ischeck = ", isCheck, ", serial = ", serial, ", cur_stat = ", current_status, ", res_stat = ", result)
 	if isCheck {
 		return true
 	} else {
@@ -637,10 +573,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					"settop_uuid": settop_uuid,
 				}
 				frameJSON, _ := json.Marshal(j_frame)
-				// isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
-				// if isCheck {
-				// 	return nil
-				// }
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
@@ -722,10 +654,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 					"settop_uuid": settop_uuid,
 				}
 				frameJSON, _ := json.Marshal(j_frame)
-				// isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
-				// if isCheck {
-				// 	return nil
-				// }
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
@@ -737,10 +665,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		case "warning":
 			fallthrough
 		case "danger":
-			// if mStatus[sensor_serial] == "" {
-			// 	mStatus[sensor_serial] = mImageStatus[sensor_serial]
-			// 	return nil
-			// }
 			mStatus[sensor_serial] = mImageStatus[sensor_serial]
 			mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			var settop_uuid string
@@ -821,9 +745,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		}
 	}
 	var minValue, maxValue float64
-	currentTime := time.Now()
-	formattedTime := currentTime.Format("2006-01-02 15:04:05")
-
 	for i, value := range temp_max_array {
 		if i == 0 {
 			maxValue = value
@@ -840,74 +761,17 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 		}
 	}
 
-	historyData := HistoryData{
-		SensorSerial:  sensor_serial,
-		MinValue:      minValue,
-		MaxValue:      maxValue,
-		FormattedTime: formattedTime,
+	fields := map[string]interface{}{
+		"min_value": minValue,
+		"max_value": maxValue,
 	}
-	queue.Enqueue(historyData)
-
+	getMutex.Lock()
+	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
+	if err := _writeAPI.WritePoint(context.Background(), point); err != nil {
+		log.Fatal(err)
+	}
+	getMutex.Unlock()
 	return nil
-}
-
-func insertBatch(db *sql.DB, data []HistoryData) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	sortDataByTime(data)
-
-	for _, sensorData := range data {
-		query := fmt.Sprintf(`
-			INSERT INTO %s (min_temp, max_temp, date)
-			VALUES (?, ?, ?)
-		`, sensorData.SensorSerial)
-
-		stmt, err := tx.Prepare(query)
-		if err != nil {
-			return err
-		}
-		_, err = stmt.Exec(sensorData.MinValue, sensorData.MaxValue, sensorData.FormattedTime)
-		stmt.Close()
-
-		if err != nil {
-			return err
-		}
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func sortDataByTime(data []HistoryData) {
-	timeData := make([]struct {
-		time.Time
-		Index int
-	}, len(data))
-
-	for i, d := range data {
-		parsedTime, _ := time.Parse("2006-01-02 15:04:05", d.FormattedTime)
-		timeData[i] = struct {
-			time.Time
-			Index int
-		}{parsedTime, i}
-	}
-
-	sort.Slice(timeData, func(i, j int) bool {
-		return timeData[i].Time.Before(timeData[j].Time)
-	})
-
-	sortedData := make([]HistoryData, len(data))
-	for i, td := range timeData {
-		sortedData[i] = data[td.Index]
-	}
-	copy(data, sortedData)
 }
 
 func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
@@ -1027,7 +891,7 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 func saveRawToFile(sensor_serial string, rawData []byte) error {
 	encodedData := base64.StdEncoding.EncodeToString(rawData)
 	fields := map[string]interface{}{
-		"data": encodedData,
+		"image_data": encodedData,
 	}
 	getMutex.Lock()
 	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
@@ -1048,178 +912,6 @@ func createFolder(folderPath string) error {
 		log.Println("Folder created:", folderPath)
 	} else if err != nil {
 		return err
-	}
-	return nil
-}
-
-func getSensorDataTables(db *sql.DB) ([]string, error) {
-	query := "SHOW TABLES"
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sensorTables []string
-	for rows.Next() {
-		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
-			return nil, err
-		}
-		columnNames, err := getSensorDataColumns(db, tableName)
-		if err != nil {
-			return nil, err
-		}
-		if containsSensorDataColumns(columnNames) {
-			sensorTables = append(sensorTables, tableName)
-		}
-	}
-	return sensorTables, nil
-}
-
-func getSensorDataColumns(db *sql.DB, sensorSerial string) ([]string, error) {
-	query := fmt.Sprintf("SHOW COLUMNS FROM %s", sensorSerial)
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println("Error querying columns:", err)
-		return nil, err
-	}
-	defer rows.Close()
-	var columnNames []string
-	for rows.Next() {
-		var columnName, a, b, c, d, e *string
-		if err := rows.Scan(&columnName, &a, &b, &c, &d, &e); err != nil {
-			log.Println("Error scanning column name:", err)
-			return nil, err
-		}
-		// log.Println("ColumnName:", columnName)
-		columnNames = append(columnNames, *columnName)
-	}
-	if err := rows.Err(); err != nil {
-		log.Println("Error iterating over rows:", err)
-		return nil, err
-	}
-	return columnNames, nil
-}
-
-func containsSensorDataColumns(columns []string) bool {
-	for _, columnName := range columns {
-		if columnName == "min_temp" || columnName == "max_temp" {
-			return true
-		}
-	}
-	return false
-}
-
-func deleteOldImages(basePath string) {
-	loc, _ := time.LoadLocation("Asia/Seoul")
-	for {
-		now := time.Now().In(loc)
-		nextRun := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 0, 0, loc)
-		if now.After(nextRun) {
-			nextRun = nextRun.AddDate(0, 0, 1)
-		}
-		duration := nextRun.Sub(now)
-		timer := time.NewTimer(duration)
-
-		<-timer.C
-		sensorNames, err := getSensorDataTables(db)
-		if err != nil {
-			log.Println("Error getting sensor data tables:", err)
-			continue
-		}
-		for _, sensorName := range sensorNames {
-			go func(sensor string) {
-				if err := deleteOldDataWithTransaction(db, sensor); err != nil {
-					log.Println("Error deleting old data:", err)
-				}
-			}(sensorName)
-		}
-
-		folders, err := getFolders(basePath)
-		if err != nil {
-			log.Println("Error getting folders:", err)
-			continue
-		}
-		for _, folder := range folders {
-			go func(folderPath string) {
-				if err := deleteOldImagesInFolder(filepath.Join(basePath, folderPath)); err != nil {
-					log.Println("Error deleting old images in folder:", err)
-				}
-			}(folder)
-		}
-	}
-}
-
-func getFolders(basePath string) ([]string, error) {
-	var folders []string
-	dirs, err := ioutil.ReadDir(basePath)
-	if err != nil {
-		return nil, err
-	}
-	for _, dir := range dirs {
-		if dir.IsDir() {
-			folders = append(folders, dir.Name())
-		}
-	}
-	return folders, nil
-}
-
-func deleteOldDataWithTransaction(db *sql.DB, sensorSerial string) error {
-	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
-	// sevenDaysAgo := time.Now().Add(-10 * time.Second)
-	formattedSevenDaysAgo := sevenDaysAgo.Format("2006-01-02 15:04:05")
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	deleteQuery := fmt.Sprintf(`
-        DELETE FROM %s
-        WHERE date < ?
-    `, sensorSerial)
-	_, err = tx.Exec(deleteQuery, formattedSevenDaysAgo)
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	err = tx.Commit()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func deleteFile(filePath string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	err := os.Remove(filePath)
-	if err != nil {
-		fmt.Printf("Error deleting file %s: %s\n", filePath, err)
-		return
-	}
-
-	fmt.Printf("File %s deleted successfully\n", filePath)
-}
-
-var wg sync.WaitGroup
-
-func deleteOldImagesInFolder(folderPath string) error {
-	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			if info.ModTime().Before(time.Now().Add(-7 * 24 * time.Hour)) {
-				// if info.ModTime().Before(time.Now().Add(-10 * time.Second)) {
-				wg.Add(1)
-				go deleteFile(path, &wg)
-
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		log.Println("Error deleting old images in folder:", err)
 	}
 	return nil
 }
@@ -1691,8 +1383,6 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
 		connectionMutex.Unlock()
 	}
-	// mImageStatus[sensorSerial] = "inspection"
-
 }
 
 func initThreshold9Data(sensor_uuid string) {
@@ -1744,7 +1434,6 @@ func handleFrameData(client mqtt.Client, parts []string, msg mqtt.Message) {
 	var decodedData map[string]interface{}
 	err := json.Unmarshal(msg.Payload(), &decodedData)
 	if err != nil {
-		// serverLog("센서에서 전송된 Packet에 오류가 발견되었습니다. (Code.E01)", "web", parts[5])
 		fmt.Println("JSON decoding error:", err)
 		return
 	}
@@ -1835,34 +1524,6 @@ func handleConnectionData(client mqtt.Client, parts []string, payloadStr string)
 			mImageStatus[sensor_serial] = status
 		}
 	}
-	// else {
-	// 	var checkStatus string
-	// 	var checkSerial string
-	// 	status = "normal"
-	// 	query := fmt.Sprintf(`
-	// 		SELECT status, serial
-	// 		FROM sensor
-	// 		WHERE mac = '%s'
-	// 	`,
-	// 		mac)
-	// 	rows, err := db.Query(query)
-	// 	if err != nil {
-	// 		log.Println(err)
-	// 	}
-
-	// 	defer rows.Close()
-	// 	for rows.Next() {
-	// 		err := rows.Scan(&checkStatus, &checkSerial)
-	// 		if err != nil {
-	// 			log.Println(err)
-	// 		}
-	// 		if checkStatus == "3" {
-	// 			mEventEndTimes[checkSerial] = 0
-	// 			mStatus[checkSerial] = ""
-	// 			mImageStatus[checkSerial] = ""
-	// 		}
-	// 	}
-	// }
 }
 
 var statusMutex sync.Mutex
@@ -1871,86 +1532,11 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 	mGroupUUIDs = make(map[string][]string)
 	settop_serial := parts[3]
 	sensor_serial := parts[5]
-	// mac := parts[4]
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	var status string
 	if err != nil { //sensor publish <<=
 		status = string(msg.Payload())
-		// if status == "inspection" {
-		// 	log.Println("inspection called")
-		// 	var settop_uuid string
-		// 	var group_uuid string
-		// 	var sensor_uuid string
-		// 	var sensor_name string
-		// 	query := fmt.Sprintf(`
-		// 			SELECT uuid
-		// 			FROM settop
-		// 			WHERE serial = '%s'
-		// 		`, settop_serial)
-		// 	rows1, err := db.Query(query)
-		// 	if err != nil {
-		// 		log.Println(err)
-		// 	}
-		// 	defer rows1.Close()
-		// 	for rows1.Next() {
-		// 		err := rows1.Scan(&settop_uuid)
-		// 		if err != nil {
-		// 			log.Println(err)
-		// 		}
-		// 		query2 := fmt.Sprintf(`
-		// 				SELECT group_uuid
-		// 				FROM group_gateway
-		// 				WHERE settop_uuid = '%s'
-		// 			`, settop_uuid)
-
-		// 		rows2, err := db.Query(query2)
-		// 		if err != nil {
-		// 			log.Println(err)
-		// 		}
-		// 		defer rows2.Close()
-		// 		for rows2.Next() {
-		// 			err := rows2.Scan(&group_uuid)
-		// 			if err != nil {
-		// 				log.Println(err)
-		// 			}
-		// 			mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-		// 		}
-		// 	}
-		// 	query = fmt.Sprintf(`
-		// 		SELECT uuid, name
-		// 		FROM sensor
-		// 		WHERE serial = '%s'
-		// 	`, sensor_serial)
-		// 	rows, err := db.Query(query)
-		// 	if err != nil {
-		// 		log.Println(err)
-		// 	}
-		// 	defer rows.Close()
-		// 	for rows.Next() {
-		// 		err := rows.Scan(&sensor_uuid, &sensor_name)
-		// 		if err != nil {
-		// 			log.Println(err)
-		// 		}
-		// 	}
-		// 	isCheck := duplicateCheckMessage(status, sensor_serial)
-		// 	if isCheck {
-		// 		return
-		// 	}
-		// 	set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-		// 	j_frame := map[string]interface{}{
-		// 		"status":      "inspection",
-		// 		"group_uuid":  mGroupUUIDs[sensor_serial],
-		// 		"sensor_name": sensor_name,
-		// 		"sensor_uuid": sensor_uuid,
-		// 		"settop_uuid": settop_uuid,
-		// 	}
-		// 	frameJSON, _ := json.Marshal(j_frame)
-		// 	statusMutex.Lock()
-		// 	client.Publish(set_topic, 1, false, frameJSON)
-		// 	statusMutex.Unlock()
-		// 	return
-		// }
 	} else {
 		status, _ = j_frame["status"].(string)
 
@@ -1989,8 +1575,7 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 				}
 			}
 
-			sensorSerial := parts[5]
-			isCheck := duplicateCheckMessage(string(status), sensorSerial)
+			isCheck := duplicateCheckMessage(string(status), sensor_serial)
 			if isCheck {
 				return
 			}
@@ -1999,7 +1584,7 @@ func handleStatusData(client mqtt.Client, parts []string, payloadStr string, msg
 			status = '%s'
 		WHERE serial = '%s'
 		`,
-				strconv.Itoa(result), sensorSerial)
+				strconv.Itoa(result), sensor_serial)
 			_, err = db.Exec(query1)
 			if err != nil {
 				log.Println(err)
