@@ -48,7 +48,8 @@
         "bucket": "sensors",
         "address": "http://127.0.0.1:8086",
         "token": "AagQegiMS9gO4T5YrGhj5Wbg_YNS20I4gAn7Xjm5xNg18mTK21ftUVBV7xhaL4Ne1x_xAZ_uSGKe-T3Xz0xOqw==",
-        "measurement": "serials"
+        "measurement": "serials",
+        "is_log": false
       },
 
       "broker": {

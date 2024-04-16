@@ -44,6 +44,7 @@ import (
 	"firebase.google.com/go/v4/messaging"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"github.com/influxdata/influxdb-client-go/v2/api"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -61,32 +62,27 @@ var mu sync.Mutex
 var temp_min_array [9]float64
 var temp_max_array [9]float64
 var broker_mutex = &sync.Mutex{}
-var (
-	aesSecretKey []byte
-)
+var aesSecretKey []byte
 
 var mEventEndTimes map[string]int64
+var mStatus map[string]string
+var mImageStatus map[string]string
+var mGroupUUIDs map[string][]string
+
+var dbMutex sync.Mutex
+var queue chan *write.Point
+
+const (
+	queueSize   = 1000
+	flushPeriod = 1 * time.Second
+)
 
 func init() {
 	mEventEndTimes = make(map[string]int64)
-}
-
-var mStatus map[string]string
-
-func init() {
 	mStatus = make(map[string]string)
-}
-
-var mImageStatus map[string]string
-
-func init() {
 	mImageStatus = make(map[string]string)
-}
-
-var mGroupUUIDs map[string][]string
-
-func init() {
 	mGroupUUIDs = make(map[string][]string)
+	queue = make(chan *write.Point, queueSize)
 }
 
 type SensorData struct {
@@ -104,11 +100,9 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
-var (
-	firebase_client *messaging.Client
-	firebase_ctx    context.Context = context.Background()
-	tokenList       []string
-)
+var firebase_client *messaging.Client
+var firebase_ctx context.Context = context.Background()
+var tokenList []string
 
 func accessibleRolesForAT() map[string][]string {
 	return map[string][]string{
@@ -148,6 +142,17 @@ func main() {
 	_influxdb_client = influxdb2.NewClient(Conf.InfluxDB.Address, Conf.InfluxDB.Token)
 	_writeAPI = _influxdb_client.WriteAPIBlocking(Conf.InfluxDB.Org, Conf.InfluxDB.Bucket)
 	_queryAPI = _influxdb_client.QueryAPI(Conf.InfluxDB.Org)
+
+	go writeQueue(_writeAPI)
+
+	_, err = _influxdb_client.Health(context.Background())
+	if err != nil {
+		log.Fatalf("Failed to connect to InfluxDB: %s", err)
+	}
+
+	// Log connection status
+	log.Println("Connected to InfluxDB")
+
 	defer _influxdb_client.Close()
 
 	logFilePath := filepath.Join(Conf.Log.Dir, Conf.Log.File)
@@ -482,16 +487,12 @@ func duplicateCheckMessage(status string, serial string) bool {
 
 var pubMutex sync.Mutex
 
-func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error {
+func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_serial string) error {
 	mGroupUUIDs = make(map[string][]string)
 	EVENT_DELAY := time.Duration(10)
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
-	temp_min_array, temp_max_array, err := createImageFromData(data, 60, 50, 0)
-	if err != nil {
-		return errors.New("img field not found or not a string")
-	}
 	mImageStatus[sensor_serial] = "normal"
-	for i, max_temp := range temp_max_array {
+	for i, max_temp := range max_array {
 		tempWarningStr := thresholds[i].GetTempWarning()
 		tempDangerStr := thresholds[i].GetTempDanger()
 		tempDangerFloat, _ := strconv.ParseFloat(tempDangerStr, 64)
@@ -658,8 +659,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
 				pubMutex.Unlock()
-			} else {
-
 			}
 			break
 		case "warning":
@@ -744,33 +743,6 @@ func publishStatus(data []byte, settop_serial, mac, sensor_serial string) error 
 			break
 		}
 	}
-	var minValue, maxValue float64
-	for i, value := range temp_max_array {
-		if i == 0 {
-			maxValue = value
-		} else {
-			maxValue = math.Max(maxValue, value)
-		}
-	}
-
-	for i, value := range temp_min_array {
-		if i == 0 {
-			minValue = value
-		} else {
-			minValue = math.Min(minValue, value)
-		}
-	}
-
-	fields := map[string]interface{}{
-		"min_value": minValue,
-		"max_value": maxValue,
-	}
-	getMutex.Lock()
-	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
-	if err := _writeAPI.WritePoint(context.Background(), point); err != nil {
-		log.Fatal(err)
-	}
-	getMutex.Unlock()
 	return nil
 }
 
@@ -867,8 +839,6 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 	}
 }
 
-var saveMutex sync.Mutex
-
 func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_serial string) error {
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(data, &j_frame)
@@ -877,10 +847,12 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 		return err
 	}
 	imgData, _ := base64.StdEncoding.DecodeString(j_frame["raw"].(string))
-	saveMutex.Lock()
-	publishStatus(imgData, settop_serial, mac, sensor_serial)
-	saveMutex.Unlock()
-	err = saveRawToFile(sensor_serial, imgData)
+	min_array, max_array, minValue, maxValue, err := createImageFromData(imgData, 60, 50, 0)
+	if err != nil {
+		return errors.New("img field not found or not a string")
+	}
+	publishStatus(min_array, max_array, settop_serial, mac, sensor_serial)
+	err = saveInfluxData(sensor_serial, imgData, minValue, maxValue)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
 		return nil
@@ -888,17 +860,16 @@ func saveImageToFile(filePath string, data []byte, settop_serial, mac, sensor_se
 	return nil
 }
 
-func saveRawToFile(sensor_serial string, rawData []byte) error {
+func saveInfluxData(sensor_serial string, rawData []byte, minValue, maxValue float64) error {
 	encodedData := base64.StdEncoding.EncodeToString(rawData)
 	fields := map[string]interface{}{
 		"image_data": encodedData,
+		"min_value":  minValue,
+		"max_value":  maxValue,
 	}
-	getMutex.Lock()
+
 	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
-	if err := _writeAPI.WritePoint(context.Background(), point); err != nil {
-		log.Fatal(err)
-	}
-	getMutex.Unlock()
+	putPoint(point)
 	return nil
 }
 
@@ -1120,7 +1091,7 @@ func createSensorDataTable(db *sql.DB, tableName string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s 테이블이 성공적으로 생성되었습니다.\n", tableName)
+	// fmt.Printf("%s 테이블이 성공적으로 생성되었습니다.\n", tableName)
 	return nil
 }
 
@@ -1677,7 +1648,7 @@ func handleInfoData(client mqtt.Client, parts []string, payloadStr string, msg m
 	mainListMapping = NewMainListResponseMapping()
 }
 
-func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, error) {
+func createImageFromData(data []byte, width, height, startRow int) ([9]float64, [9]float64, float64, float64, error) {
 	min := 255.
 	max := 0.
 	TEMP_MIN := 174.7
@@ -1729,5 +1700,58 @@ func createImageFromData(data []byte, width, height, startRow int) ([9]float64, 
 	for i, value := range min_arr {
 		min_arr[i] = math.Round((value-TEMP_MIN)*10) / 10
 	}
-	return min_arr, max_arr, nil
+
+	var minValue, maxValue float64
+	for i, value := range max_arr {
+		if i == 0 {
+			maxValue = value
+		} else {
+			maxValue = math.Max(maxValue, value)
+		}
+	}
+
+	for i, value := range min_arr {
+		if i == 0 {
+			minValue = value
+		} else {
+			minValue = math.Min(minValue, value)
+		}
+	}
+
+	return min_arr, max_arr, minValue, maxValue, nil
+}
+
+func putPoint(point *write.Point) {
+	queue <- point
+}
+
+func writeQueue(writeAPI api.WriteAPIBlocking) {
+	ticker := time.NewTicker(flushPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			flushQueue(writeAPI)
+		}
+	}
+}
+
+func flushQueue(writeAPI api.WriteAPIBlocking) {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	var pointsToWrite []*write.Point
+	for len(queue) > 0 {
+		point := <-queue
+		pointsToWrite = append(pointsToWrite, point)
+	}
+
+	if len(pointsToWrite) > 0 {
+		if Conf.InfluxDB.IsLog {
+			log.Println("queue len : ", len(pointsToWrite))
+		}
+		if err := writeAPI.WritePoint(context.Background(), pointsToWrite...); err != nil {
+			log.Println(err)
+		}
+	}
 }

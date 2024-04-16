@@ -1857,7 +1857,7 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 	if in.GetInterval() < 10 {
 		query = fmt.Sprintf(`from(bucket: "%s")
 		|> range(start: %s, stop: %s)
-		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._measurement == "%s")
 		|> filter(fn: (r) => r._field != "image_data")
 		`,
 			Conf.InfluxDB.Bucket,
@@ -1875,7 +1875,7 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 
 		query = fmt.Sprintf(`from(bucket: "%s")
 		|> range(start: %s, stop: %s)
-		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._measurement == "%s")
 		|> filter(fn: (r) => r._field != "image_data")
 		|> aggregateWindow(every: %ds, fn: max, createEmpty: false)
 		|> group(columns: ["_measurement", "_field"])
@@ -1895,7 +1895,7 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 
 		query = fmt.Sprintf(`from(bucket: "%s")
 		|> range(start: %s, stop: %s)
-		|> filter(fn: (r) => r._field != "%s")
+		|> filter(fn: (r) => r._measurement == "%s")
 		|> filter(fn: (r) => r._field != "image_data")
 		|> aggregateWindow(every: %dm, fn: max, createEmpty: false)
 		|> group(columns: ["_measurement", "_field"])
@@ -1906,7 +1906,6 @@ func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequ
 			in.GetSensorSerial(), trim_interval)
 	}
 
-	log.Println("query = ", query)
 	results, err := _queryAPI.Query(context.Background(), query)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)

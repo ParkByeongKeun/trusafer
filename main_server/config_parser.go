@@ -45,6 +45,7 @@ type Config struct {
 		Address     string `json:"address"`
 		Token       string `json:"token"`
 		Measurement string `json:"measurement"`
+		IsLog       bool   `json:"is_log"`
 	} `json:"influxdb"`
 	Broker_address struct {
 		Address string `json:"address"`
