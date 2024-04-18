@@ -23,7 +23,7 @@ type Config struct {
 	} `json:"database"`
 	Etc struct {
 		SaveImageDir string `json:"save_image_dir"`
-	} `json:"etc`
+	} `json:"etc"`
 	Gw struct {
 		Port int `json:"port"`
 	} `json:"gw"`
@@ -47,10 +47,6 @@ type Config struct {
 		Measurement string `json:"measurement"`
 		IsLog       bool   `json:"is_log"`
 	} `json:"influxdb"`
-	Broker_address struct {
-		Address string `json:"address"`
-		Port    string `json:"port"`
-	} `json:"broker_address"`
 	Jwt struct {
 		SecretKeyAT     string        `json:"secret_key_at"`
 		TokenDurationAT time.Duration `json:"token_duration_at"`
@@ -63,6 +59,7 @@ type Config struct {
 	Broker struct {
 		UserId       string `json:"user_id"`
 		UserPassword string `json:"user_password"`
+		Address 		 string `json:"address"`
 	} `json:"broker"`
 }
 

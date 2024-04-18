@@ -1,59 +1,54 @@
 {
-    "grpc": {
-        "port": 9000,
-        "cert_file": "/Users/bkpark/works/go/trusafer/main_server/cert/server.crt",
-        "key_file": "/Users/bkpark/works/go/trusafer/main_server/cert/private.pem"
-    },
-    "gw": {
-        "port": 19000
-    },
-    "im": {
-        "port": 19001
-    },
-    "database": {
-        "id": "root",
-        "password": "tmxjavm67",
-        "address": "127.0.0.1:13306",
-        "name": "trusafer"
-    },
-    "etc":{
-        "save_image_dir": "result_image"
-    },
-    
-    "jwt": {
-        "secret_key_rt": "secret1",
-        "secret_key_at": "secret2",
-        "token_duration_at": 1800,
-        "token_duration_rt": 2592000
-      },
-    "broker_address": {
-        "address": "192.168.13.5",
-        "port": "21984"
-    },
-    "log": {
-        "dir": "logs",
-        "file": "mqtt.log",
-        "max_size": 10,
-        "max_backups": 6,
-        "max_age": 30,
-        "local_time": true,
-        "compress": false
-      },
-      "encryption": {
-        "passphrase": "passphrase"
-      },
+  "grpc": {
+    "port": 9000,
+    "cert_file": "/Users/bkpark/works/go/trusafer/main_server/cert/server.crt",
+    "key_file": "/Users/bkpark/works/go/trusafer/main_server/cert/private.pem"
+  },
+  "gw": {
+    "port": 19000
+  },
+  "im": {
+    "port": 19001
+  },
+  "database": {
+    "id": "root",
+    "password": "tmxjavm67",
+    "address": "127.0.0.1:13306",
+    "name": "trusafer"
+  },
+  "etc": {
+    "save_image_dir": "result_image"
+  },
 
-      "influxdb": {
-        "org": "trusafer",
-        "bucket": "sensors",
-        "address": "http://127.0.0.1:8086",
-        "token": "AagQegiMS9gO4T5YrGhj5Wbg_YNS20I4gAn7Xjm5xNg18mTK21ftUVBV7xhaL4Ne1x_xAZ_uSGKe-T3Xz0xOqw==",
-        "measurement": "serials",
-        "is_log": false
-      },
-
-      "broker": {
-        "user_id": "ijoon",
-        "user_password": "vXH5iVMqTfXB"
-    }
+  "jwt": {
+    "secret_key_rt": "secret1",
+    "secret_key_at": "secret2",
+    "token_duration_at": 1800,
+    "token_duration_rt": 2592000
+  },
+  "log": {
+    "dir": "logs",
+    "file": "mqtt.log",
+    "max_size": 10,
+    "max_backups": 6,
+    "max_age": 30,
+    "local_time": true,
+    "compress": false
+  },
+  "encryption": {
+    "passphrase": "passphrase"
+  },
+  "influxdb": {
+    "org": "trusafer",
+    "bucket": "sensors",
+    "address": "http://127.0.0.1:8086",
+    "token": "AagQegiMS9gO4T5YrGhj5Wbg_YNS20I4gAn7Xjm5xNg18mTK21ftUVBV7xhaL4Ne1x_xAZ_uSGKe-T3Xz0xOqw==",
+    "measurement": "serials",
+    "is_log": false
+  },
+  "broker": {
+    "user_id": "ijoon",
+    "user_password": "vXH5iVMqTfXB",
+    "address": "ssl://broker:1883"
+  }
 }

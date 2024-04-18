@@ -17,8 +17,8 @@ import (
 var mu sync.Mutex
 
 var (
-	firebase_client *messaging.Client
-	firebase_ctx    context.Context = context.Background()
+	_firebase_client *messaging.Client
+	_firebase_ctx    context.Context = context.Background()
 )
 
 type AccountKey struct {
@@ -26,36 +26,36 @@ type AccountKey struct {
 }
 
 // 파이어베이스 초기화
-func InitApp(serviceAccountKeyPath string) (*messaging.Client, error) {
+func InitFirebase(serviceAccountKeyPath string) error {
 	keyFile, err := ioutil.ReadFile(serviceAccountKeyPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	accountKey := AccountKey{}
 	if err := json.Unmarshal(keyFile, &accountKey); err != nil {
-		return nil, err
+		return err
 	}
 
 	opt := option.WithCredentialsFile(serviceAccountKeyPath)
 	config := &firebase.Config{ProjectID: accountKey.ProjectID}
 
-	app, err := firebase.NewApp(firebase_ctx, config, opt)
+	app, err := firebase.NewApp(_firebase_ctx, config, opt)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	firebase_client, err = app.Messaging(firebase_ctx)
+	_firebase_client, err = app.Messaging(_firebase_ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return firebase_client, nil
+	return nil
 }
 
 func SubscribeToTopic(tokens []string, topic string, isSubscribe bool) error {
 	if isSubscribe {
-		_, err := firebase_client.SubscribeToTopic(firebase_ctx, tokens, topic)
+		_, err := _firebase_client.SubscribeToTopic(_firebase_ctx, tokens, topic)
 		if err != nil {
 			log.Printf("Error subscribing to topic %s: %v", topic, err)
 			return err
@@ -63,7 +63,7 @@ func SubscribeToTopic(tokens []string, topic string, isSubscribe bool) error {
 
 		log.Printf("Tokens subscribed to topic %s", topic)
 	} else {
-		_, err := firebase_client.UnsubscribeFromTopic(firebase_ctx, tokens, topic)
+		_, err := _firebase_client.UnsubscribeFromTopic(_firebase_ctx, tokens, topic)
 		if err != nil {
 			log.Printf("Error subscribing to topic %s: %v", topic, err)
 			return err
@@ -92,7 +92,7 @@ func SendMessage(title, body, style, topic string) error {
 		Topic: topic,
 	}
 
-	response, err := firebase_client.Send(firebase_ctx, message)
+	response, err := _firebase_client.Send(_firebase_ctx, message)
 	if err != nil {
 		log.Printf("Error sending message to topic %s: %v", topic, err)
 		return err

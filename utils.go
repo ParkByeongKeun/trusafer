@@ -4,66 +4,11 @@ import (
 	"bufio"
 	"database/sql"
 	"log"
+	"math/rand"
 	"os"
 	"path"
 	"strings"
 )
-
-// func getSqlNullStructValidValue(sqlNullStruct interface{}) interface{} {
-
-// 	switch sqlNullStruct.(type) {
-// 	case sql.NullString:
-// 		if sqlNullStruct.(sql.NullString).Valid {
-// 			return sqlNullStruct.(sql.NullString).String
-// 		} else {
-// 			return ""
-// 		}
-// 	case sql.NullInt16:
-// 		if sqlNullStruct.(sql.NullInt16).Valid {
-// 			return sqlNullStruct.(sql.NullInt16).Int16
-// 		} else {
-// 			return 0
-// 		}
-// 	case sql.NullInt32:
-// 		if sqlNullStruct.(sql.NullInt32).Valid {
-// 			return sqlNullStruct.(sql.NullInt32).Int32
-// 		} else {
-// 			return 0
-// 		}
-// 	case sql.NullInt64:
-// 		if sqlNullStruct.(sql.NullInt64).Valid {
-// 			return sqlNullStruct.(sql.NullInt64).Int64
-// 		} else {
-// 			return 0
-// 		}
-// 	case sql.NullFloat64:
-// 		if sqlNullStruct.(sql.NullFloat64).Valid {
-// 			return sqlNullStruct.(sql.NullFloat64).Float64
-// 		} else {
-// 			return 0
-// 		}
-// 	case sql.NullBool:
-// 		if sqlNullStruct.(sql.NullBool).Valid {
-// 			return sqlNullStruct.(sql.NullBool).Bool
-// 		} else {
-// 			return false
-// 		}
-// 	case sql.NullByte:
-// 		if sqlNullStruct.(sql.NullByte).Valid {
-// 			return sqlNullStruct.(sql.NullByte).Byte
-// 		} else {
-// 			return 0
-// 		}
-// 	case sql.NullTime:
-// 		if sqlNullStruct.(sql.NullTime).Valid {
-// 			return sqlNullStruct.(sql.NullTime).Time
-// 		} else {
-// 			return 0
-// 		}
-// 	default:
-// 		return nil
-// 	}
-// }
 
 func getNullStringValidValue(nullstring sql.NullString) string {
 	if nullstring.Valid {
@@ -103,4 +48,13 @@ func saveJpegBytesImage(imgByte []byte, savePath string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func RandomString(n int) string {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
 }
