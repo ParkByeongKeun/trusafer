@@ -487,9 +487,7 @@ func duplicateCheckMessage(status string, serial string) bool {
 
 var pubMutex sync.Mutex
 
-func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_serial string) error {
-	mGroupUUIDs = make(map[string][]string)
-	EVENT_DELAY := time.Duration(10)
+func setImageStatus(sensor_serial string, max_array [9]float64) {
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	mImageStatus[sensor_serial] = "normal"
 	for i, max_temp := range max_array {
@@ -504,6 +502,12 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 			mImageStatus[sensor_serial] = "danger"
 		}
 	}
+}
+
+func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_serial string) error {
+	mGroupUUIDs = make(map[string][]string)
+	EVENT_DELAY := time.Duration(10)
+	setImageStatus(sensor_serial, max_array)
 
 	if mEventEndTimes[sensor_serial]+int64(EVENT_DELAY) > time.Now().Unix() { // 기존 이벤트 유지시간
 		if mImageStatus[sensor_serial] != "normal" {
@@ -566,6 +570,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 						log.Println(err)
 					}
 				}
+				setImageStatus(sensor_serial, max_array)
 				j_frame := map[string]interface{}{
 					"status":      mImageStatus[sensor_serial],
 					"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -646,7 +651,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 						log.Println(err)
 					}
 				}
-
+				setImageStatus(sensor_serial, max_array)
 				j_frame := map[string]interface{}{
 					"status":      mImageStatus[sensor_serial],
 					"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -724,6 +729,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					log.Println(err)
 				}
 			}
+			setImageStatus(sensor_serial, max_array)
 			j_frame := map[string]interface{}{
 				"status":      mImageStatus[sensor_serial],
 				"group_uuid":  mGroupUUIDs[sensor_serial],
