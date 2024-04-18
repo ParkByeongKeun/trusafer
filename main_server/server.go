@@ -570,7 +570,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 						log.Println(err)
 					}
 				}
-				setImageStatus(sensor_serial, max_array)
 				j_frame := map[string]interface{}{
 					"status":      mImageStatus[sensor_serial],
 					"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -651,7 +650,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 						log.Println(err)
 					}
 				}
-				setImageStatus(sensor_serial, max_array)
 				j_frame := map[string]interface{}{
 					"status":      mImageStatus[sensor_serial],
 					"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -729,7 +727,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					log.Println(err)
 				}
 			}
-			setImageStatus(sensor_serial, max_array)
 			j_frame := map[string]interface{}{
 				"status":      mImageStatus[sensor_serial],
 				"group_uuid":  mGroupUUIDs[sensor_serial],
@@ -738,10 +735,10 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
-			isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
-			if isCheck {
-				return nil
-			}
+			// isCheck := duplicateCheckMessage(mImageStatus[sensor_serial], sensor_serial)
+			// if isCheck {
+			// 	return nil
+			// }
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			pubMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
