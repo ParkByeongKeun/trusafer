@@ -1090,11 +1090,6 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 					log.Println(err)
 				}
 			}
-
-			isCheck := duplicateCheckMessage(string(status), sensor_serial)
-			if isCheck {
-				return
-			}
 			query1 := fmt.Sprintf(`
 								UPDATE sensor SET
 									status = '%s'
