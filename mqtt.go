@@ -35,16 +35,15 @@ func startSubscriber(client mqtt.Client, topic string, wg *sync.WaitGroup) {
 func handleMessage(client mqtt.Client, msg mqtt.Message) {
 	payloadStr := string(msg.Payload())
 	parts := strings.Split(msg.Topic(), "/")
-
 	switch {
 	case strings.HasPrefix(msg.Topic(), base_topic+"/get/settop_sn/"):
 		handleGetSettop_SN(client, parts, payloadStr)
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/regist/sensor/"):
-		handleRegistSensor(client, parts, payloadStr)
+		handleRegistSensor(client, parts[3], parts[4], parts[5], payloadStr)
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/deregist/sensor/"):
-		handleDeregistSensor(client, parts)
+		handleDeregistSensor(client, parts[3], parts[4], parts[5])
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/data/frame/"):
 		handleFrameData(client, parts[3], parts[4], parts[5], msg)
@@ -74,11 +73,10 @@ func duplicateCheckMessage(status string, serial string) bool {
 		result = 3
 	}
 	query := fmt.Sprintf(`
-				SELECT status 
-				FROM sensor 
-				WHERE serial = '%s'
-			`, serial)
-
+		SELECT status 
+		FROM sensor 
+		WHERE serial = '%s'
+	`, serial)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -103,15 +101,13 @@ func duplicateCheckMessage(status string, serial string) bool {
 var getMutex sync.RWMutex
 
 func handleGetSettop_SN(client mqtt.Client, parts []string, payloadStr string) {
-
 	var settop_serial string
 	mac := parts[3]
 	query := fmt.Sprintf(`
 		SELECT serial 
 		FROM settop 
 		WHERE mac1 = '%s' OR mac2 = '%s'
-	`,
-		mac, mac)
+	`, mac, mac)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -160,7 +156,6 @@ func serverLog(place string, floor string, room string, sensor_name string, sens
 }
 
 func createSensorDataTable(db *sql.DB, tableName string) error {
-
 	query := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			id int(11) NOT NULL AUTO_INCREMENT,
@@ -175,34 +170,32 @@ func createSensorDataTable(db *sql.DB, tableName string) error {
 	if err != nil {
 		return err
 	}
-	// fmt.Printf("%s 테이블이 성공적으로 생성되었습니다.\n", tableName)
 	return nil
 }
 
-
 func initThreshold9Data(sensor_uuid string) {
 	query := fmt.Sprintf(`
-			INSERT IGNORE INTO threshold SET
-				sensor_uuid = '%s', 
-				temp_warning1 = '%s',
-				temp_danger1 = '%s',
-				temp_warning2 = '%s',
-				temp_danger2 = '%s',
-				temp_warning3 = '%s',
-				temp_danger3 = '%s',
-				temp_warning4 = '%s',
-				temp_danger4 = '%s',
-				temp_warning5 = '%s',
-				temp_danger5 = '%s',
-				temp_warning6 = '%s',
-				temp_danger6 = '%s',
-				temp_warning7 = '%s',
-				temp_danger7 = '%s',
-				temp_warning8 = '%s',
-				temp_danger8 = '%s',
-				temp_warning9 = '%s',
-				temp_danger9 = '%s'
-			`,
+		INSERT IGNORE INTO threshold SET
+			sensor_uuid = '%s', 
+			temp_warning1 = '%s',
+			temp_danger1 = '%s',
+			temp_warning2 = '%s',
+			temp_danger2 = '%s',
+			temp_warning3 = '%s',
+			temp_danger3 = '%s',
+			temp_warning4 = '%s',
+			temp_danger4 = '%s',
+			temp_warning5 = '%s',
+			temp_danger5 = '%s',
+			temp_warning6 = '%s',
+			temp_danger6 = '%s',
+			temp_warning7 = '%s',
+			temp_danger7 = '%s',
+			temp_warning8 = '%s',
+			temp_danger8 = '%s',
+			temp_warning9 = '%s',
+			temp_danger9 = '%s'
+		`,
 		sensor_uuid, strconv.Itoa(60), strconv.Itoa(100),
 		strconv.Itoa(60), strconv.Itoa(100),
 		strconv.Itoa(60), strconv.Itoa(100),
@@ -221,7 +214,7 @@ func initThreshold9Data(sensor_uuid string) {
 
 var registMutex sync.Mutex
 
-func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
+func handleRegistSensor(client mqtt.Client, settop_serial string, settopMac string, sensorSerial string, payloadStr string) {
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("2006-01-02 15:04:05")
 	var settop_uuid string
@@ -230,16 +223,12 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	var floor string
 	var room string
 	var uuid = uuid.New()
-	settop_serial := parts[3]
-	settopMac := parts[4]
-	sensorSerial := parts[5]
 	createSensorDataTable(db, sensorSerial)
 	query := fmt.Sprintf(`
 		SELECT uuid, place_uuid, floor, room  
 		FROM settop 
 		WHERE mac1 = '%s' OR mac2 = '%s'
-	`,
-		settopMac, settopMac)
+	`, settopMac, settopMac)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -256,11 +245,10 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 		return
 	}
 	query = fmt.Sprintf(`
-			SELECT name 
-			FROM place 
-			WHERE uuid = '%s' 
-		`,
-		place_uuid)
+		SELECT name 
+		FROM place 
+		WHERE uuid = '%s' 
+	`, place_uuid)
 
 	rows, err = db.Query(query)
 	if err != nil {
@@ -308,11 +296,10 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	var get_sensor_uuid string
 	var sensor_name string
 	query = fmt.Sprintf(`
-			SELECT uuid, name 
-			FROM sensor 
-			WHERE serial = '%s'
-		`,
-		sensorSerial)
+		SELECT uuid, name 
+		FROM sensor 
+		WHERE serial = '%s'
+	`, sensorSerial)
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -372,13 +359,8 @@ func handleRegistSensor(client mqtt.Client, parts []string, payloadStr string) {
 	mStatus[sensorSerial] = "normal"
 }
 
-
-func handleDeregistSensor(client mqtt.Client, parts []string) {
-	sensorSerial := parts[5]
-	settopSerial := parts[3]
-	settopMac := parts[4]
+func handleDeregistSensor(client mqtt.Client, settopSerial string, settopMac string, sensorSerial string) {
 	log.Println("handleDeregistSensor called: ", sensorSerial)
-
 	mainListMapping = NewMainListResponseMapping()
 	var place_uuid string
 	var place_name string
@@ -388,8 +370,7 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		SELECT place_uuid, floor, room  
 		FROM settop 
 		WHERE serial = '%s' 
-	`,
-		settopSerial)
+	`, settopSerial)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -404,11 +385,10 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 	}
 
 	query = fmt.Sprintf(`
-			SELECT name 
-			FROM place 
-			WHERE uuid = '%s' 
-		`,
-		place_uuid)
+		SELECT name 
+		FROM place 
+		WHERE uuid = '%s' 
+	`, place_uuid)
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -428,10 +408,10 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 	var settop_uuid string
 
 	query = fmt.Sprintf(`
-				SELECT uuid, name, settop_uuid
-				FROM sensor
-				WHERE serial = '%s'
-			`, sensorSerial)
+		SELECT uuid, name, settop_uuid
+		FROM sensor
+		WHERE serial = '%s'
+	`, sensorSerial)
 	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -444,11 +424,10 @@ func handleDeregistSensor(client mqtt.Client, parts []string) {
 		}
 
 		query2 := fmt.Sprintf(`
-						SELECT group_uuid
-						FROM group_gateway
-						WHERE settop_uuid = '%s'
-					`, settop_uuid)
-
+			SELECT group_uuid
+			FROM group_gateway
+			WHERE settop_uuid = '%s'
+		`, settop_uuid)
 		rows2, err := db.Query(query2)
 		if err != nil {
 			log.Println(err)
@@ -508,8 +487,7 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 			SELECT uuid
 			FROM sensor 
 			WHERE serial = '%s'
-			`,
-			sensor_serial)
+		`, sensor_serial)
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -530,8 +508,7 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 				temp_danger8, temp_warning9, temp_danger9
 			FROM threshold 
 			WHERE sensor_uuid = '%s'
-			`,
-			sensor_uuid)
+			`, sensor_uuid)
 
 		rows, err = db.Query(query)
 		if err != nil {
@@ -550,7 +527,6 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 			var tempWarning7, tempDanger7 string
 			var tempWarning8, tempDanger8 string
 			var tempWarning9, tempDanger9 string
-
 			if err := rows.Scan(
 				&tempWarning1, &tempDanger1,
 				&tempWarning2, &tempDanger2,
@@ -565,7 +541,6 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 				log.Println(err)
 				return nil
 			}
-
 			threshold1 := &pb.Threshold{TempWarning: tempWarning1, TempDanger: tempDanger1}
 			thresholds = append(thresholds, threshold1)
 			threshold2 := &pb.Threshold{TempWarning: tempWarning2, TempDanger: tempDanger2}
@@ -584,7 +559,6 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 			thresholds = append(thresholds, threshold8)
 			threshold9 := &pb.Threshold{TempWarning: tempWarning9, TempDanger: tempDanger9}
 			thresholds = append(thresholds, threshold9)
-
 			thresholdMapping.AddThresholdMapping(key, thresholds)
 		}
 		return thresholds
@@ -614,7 +588,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 	mGroupUUIDs = make(map[string][]string)
 	EVENT_DELAY := time.Duration(10)
 	setImageStatus(sensor_serial, max_array)
-
 	if mEventEndTimes[sensor_serial]+int64(EVENT_DELAY) > time.Now().Unix() { // 기존 이벤트 유지시간
 		if mImageStatus[sensor_serial] != "normal" {
 			if mStatus[sensor_serial] != mImageStatus[sensor_serial] {
@@ -624,13 +597,11 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				var group_uuid string
 				var sensor_uuid string
 				var sensor_name string
-
 				query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
-
 				rows1, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
@@ -642,10 +613,10 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 						log.Println(err)
 					}
 					query2 := fmt.Sprintf(`
-							SELECT group_uuid 
-							FROM group_gateway 
-							WHERE settop_uuid = '%s'
-						`, settop_uuid)
+						SELECT group_uuid 
+						FROM group_gateway 
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
 					rows2, err := db.Query(query2)
 					if err != nil {
 						log.Println(err)
@@ -664,7 +635,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					FROM sensor 
 					WHERE serial = '%s'
 				`, sensor_serial)
-
 				rows, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
@@ -701,13 +671,11 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				var group_uuid string
 				var sensor_uuid string
 				var sensor_name string
-
 				query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
 				`, settop_serial)
-
 				rows1, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
@@ -718,13 +686,11 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					if err != nil {
 						log.Println(err)
 					}
-
 					query2 := fmt.Sprintf(`
-							SELECT group_uuid 
-							FROM group_gateway 
-							WHERE settop_uuid = '%s'
-						`, settop_uuid)
-
+						SELECT group_uuid 
+						FROM group_gateway 
+						WHERE settop_uuid = '%s'
+					`, settop_uuid)
 					rows2, err := db.Query(query2)
 					if err != nil {
 						log.Println(err)
@@ -744,7 +710,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					FROM sensor 
 					WHERE serial = '%s'
 				`, sensor_serial)
-
 				rows, err := db.Query(query)
 				if err != nil {
 					log.Println(err)
@@ -784,7 +749,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				FROM settop 
 				WHERE serial = '%s'
 			`, settop_serial)
-
 			rows1, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -796,11 +760,10 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 					log.Println(err)
 				}
 				query2 := fmt.Sprintf(`
-						SELECT group_uuid 
-						FROM group_gateway 
-						WHERE settop_uuid = '%s'
-					`, settop_uuid)
-
+					SELECT group_uuid 
+					FROM group_gateway 
+					WHERE settop_uuid = '%s'
+				`, settop_uuid)
 				rows2, err := db.Query(query2)
 				if err != nil {
 					log.Println(err)
@@ -821,7 +784,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				FROM sensor 
 				WHERE serial = '%s'
 			`, sensor_serial)
-
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -841,7 +803,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
-
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			pubMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
@@ -855,7 +816,6 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 func handleFrameData(client mqtt.Client, settop_serial string, mac string, sensor_serial string, msg mqtt.Message) {
 	frameMutex.Lock()
 	defer frameMutex.Unlock()
-
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
@@ -891,8 +851,7 @@ func handleConnectionData(client mqtt.Client, settop_serial string, mac string, 
 		UPDATE settop SET
 			is_alive = '%s'
 		WHERE serial = '%s'
-		`,
-		isalive, settop_serial)
+	`, isalive, settop_serial)
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -900,7 +859,6 @@ func handleConnectionData(client mqtt.Client, settop_serial string, mac string, 
 	var status = ""
 	if payloadStr == "0" {
 		status = "inspection"
-
 		var settop_uuid string
 		var group_uuid string
 		var sensor_uuid string
@@ -910,7 +868,8 @@ func handleConnectionData(client mqtt.Client, settop_serial string, mac string, 
 		query = fmt.Sprintf(`
 			SELECT uuid, name, serial, settop_uuid
 			FROM sensor
-			WHERE mac = '%s'`, mac)
+			WHERE mac = '%s'
+		`, mac)
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -973,9 +932,7 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 		SELECT place_uuid, room, floor  
 		FROM settop 
 		WHERE serial = '%s' 
-	`,
-		settop_serial)
-
+	`, settop_serial)
 	rows, err := db.Query(query)
 	if err != nil {
 		log.Println(err)
@@ -990,11 +947,10 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 	}
 
 	query = fmt.Sprintf(`
-			SELECT name 
-			FROM place 
-			WHERE uuid = '%s' 
-		`,
-		place_uuid)
+		SELECT name 
+		FROM place 
+		WHERE uuid = '%s' 
+	`, place_uuid)
 
 	rows, err = db.Query(query)
 	if err != nil {
@@ -1064,10 +1020,6 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 		} else if string(status) == "danger" {
 			result = 2
 		} else if string(status) == "inspection" {
-			isCheck := duplicateCheckMessage("inspection", sensor_serial)
-			if isCheck {
-				return
-			}
 			result = 3
 		}
 		mImageStatus[sensor_serial] = string(status)
@@ -1078,7 +1030,6 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 				FROM sensor 
 				WHERE serial = '%s'
 			`, sensor_serial)
-
 			rows, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -1091,10 +1042,10 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 				}
 			}
 			query1 := fmt.Sprintf(`
-								UPDATE sensor SET
-									status = '%s'
-								WHERE serial = '%s'
-								`, strconv.Itoa(result), sensor_serial)
+				UPDATE sensor SET
+					status = '%s'
+				WHERE serial = '%s'
+			`, strconv.Itoa(result), sensor_serial)
 			_, err = db.Exec(query1)
 			if err != nil {
 				log.Println(err)
@@ -1103,11 +1054,10 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 			var settop_uuid string
 			var group_uuid string
 			query = fmt.Sprintf(`
-							SELECT uuid 
-							FROM settop 
-							WHERE serial = '%s'
-							`, settop_serial)
-
+				SELECT uuid 
+				FROM settop 
+				WHERE serial = '%s'
+			`, settop_serial)
 			rows1, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
@@ -1120,11 +1070,10 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 				}
 
 				query2 := fmt.Sprintf(`
-									SELECT group_uuid 
-									FROM group_gateway 
-									WHERE settop_uuid = '%s'
-								`, settop_uuid)
-
+					SELECT group_uuid 
+					FROM group_gateway 
+					WHERE settop_uuid = '%s'
+				`, settop_uuid)
 				rows2, err := db.Query(query2)
 				if err != nil {
 					log.Println(err)
@@ -1167,10 +1116,9 @@ func handleInfoData(client mqtt.Client, settop_serial string, payloadStr string,
 	fw_version, _ := j_info["fw_version"].(string)
 	query := fmt.Sprintf(`
 		UPDATE settop SET
-			fw_version = '%s'
+		fw_version = '%s'
 		WHERE serial = '%s'
-		`,
-		fw_version, settop_serial)
+	`, fw_version, settop_serial)
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
@@ -1247,7 +1195,5 @@ func analizeFrame(data []byte, width, height, startRow int) ([9]float64, [9]floa
 			minValue = math.Min(minValue, value)
 		}
 	}
-
 	return min_arr, max_arr, minValue, maxValue, nil
 }
-
