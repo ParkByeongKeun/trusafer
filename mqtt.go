@@ -20,6 +20,8 @@ import (
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
 )
 
+var pubMutex sync.Mutex
+
 func startSubscriber(client mqtt.Client, topic string, wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
@@ -56,45 +58,6 @@ func handleMessage(client mqtt.Client, msg mqtt.Message) {
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/data/info/"):
 		handleInfoData(client, parts[3], payloadStr, msg)
-	}
-}
-
-func duplicateCheckMessage(status string, serial string) bool {
-	var current_status string
-	var result = -1
-	var isCheck = false
-	if string(status) == "normal" {
-		result = 0
-	} else if string(status) == "warning" {
-		result = 1
-	} else if string(status) == "danger" {
-		result = 2
-	} else if string(status) == "inspection" {
-		result = 3
-	}
-	query := fmt.Sprintf(`
-		SELECT status 
-		FROM sensor 
-		WHERE serial = '%s'
-	`, serial)
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&current_status)
-		if err != nil {
-			log.Println(err)
-		}
-		if current_status == strconv.Itoa(result) {
-			isCheck = true
-		}
-	}
-	if isCheck {
-		return true
-	} else {
-		return false
 	}
 }
 
@@ -314,49 +277,12 @@ func handleRegistSensor(client mqtt.Client, settop_serial string, settopMac stri
 	mainListMapping = NewMainListResponseMapping()
 	initThreshold9Data(get_sensor_uuid)
 	defer sqlAddSensor.Close()
-	go serverLog(place_name, floor, room, sensor_name, sensorSerial, 1)
 	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
 	message := "info"
 	registMutex.Lock()
 	client.Publish(set_topic, 1, false, message)
 	registMutex.Unlock()
-
-	if mStatus[sensorSerial] == "normal" {
-		return
-	}
-	var group_uuid string
-	query2 := fmt.Sprintf(`
-		SELECT group_uuid
-		FROM group_gateway
-		WHERE settop_uuid = '%s'
-	`, settop_uuid)
-
-	rows2, err := db.Query(query2)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows2.Close()
-	for rows2.Next() {
-		err := rows2.Scan(&group_uuid)
-		if err != nil {
-			log.Println(err)
-		}
-		mGroupUUIDs[sensorSerial] = append(mGroupUUIDs[sensorSerial], group_uuid)
-	}
-
-	set_topic = base_topic + "/data/status/" + settop_serial + "/" + settopMac + "/" + sensorSerial
-	j_frame := map[string]interface{}{
-		"status":      "normal",
-		"group_uuid":  mGroupUUIDs[sensorSerial],
-		"sensor_name": sensor_name,
-		"sensor_uuid": get_sensor_uuid,
-		"settop_uuid": settop_uuid,
-	}
-	frameJSON, _ := json.Marshal(j_frame)
-	connectionMutex.Lock()
-	client.Publish(set_topic, 1, false, frameJSON)
-	connectionMutex.Unlock()
-	mStatus[sensorSerial] = "normal"
+	mStatus[sensorSerial] = ""
 }
 
 func handleDeregistSensor(client mqtt.Client, settopSerial string, settopMac string, sensorSerial string) {
@@ -440,10 +366,6 @@ func handleDeregistSensor(client mqtt.Client, settopSerial string, settopMac str
 			}
 			mGroupUUIDs[sensorSerial] = append(mGroupUUIDs[sensorSerial], group_uuid)
 		}
-		isCheck := duplicateCheckMessage("inspection", sensorSerial)
-		if isCheck {
-			continue
-		}
 		set_topic := base_topic + "/data/status/" + settopSerial + "/" + settopMac + "/" + sensorSerial
 		j_frame := map[string]interface{}{
 			"status":      "inspection",
@@ -453,10 +375,9 @@ func handleDeregistSensor(client mqtt.Client, settopSerial string, settopMac str
 			"settop_uuid": settop_uuid,
 		}
 		frameJSON, _ := json.Marshal(j_frame)
-		connectionMutex.Lock()
+		pubMutex.Lock()
 		client.Publish(set_topic, 1, false, frameJSON)
-		go serverLog(place_name, floor, room, sensor_name, sensorSerial, 0)
-		connectionMutex.Unlock()
+		pubMutex.Unlock()
 	}
 }
 
@@ -565,8 +486,6 @@ func getThresholdMapping(key string, sensor_serial string) []*pb.Threshold {
 	}
 }
 
-var pubMutex sync.Mutex
-
 func setImageStatus(sensor_serial string, max_array [9]float64) {
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	mImageStatus[sensor_serial] = "normal"
@@ -585,6 +504,29 @@ func setImageStatus(sensor_serial string, max_array [9]float64) {
 }
 
 func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_serial string) error {
+	pubMutex.Lock()
+	defer pubMutex.Unlock()
+	var isSensorAlive int64
+	query := fmt.Sprintf(`
+		SELECT is_alive
+		FROM sensor 
+		WHERE serial = '%s'
+	`, sensor_serial)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&isSensorAlive)
+		if err != nil {
+			log.Println(err)
+		}
+		if isSensorAlive == 0 {
+			return nil
+		}
+	}
+
 	mGroupUUIDs = make(map[string][]string)
 	EVENT_DELAY := time.Duration(10)
 	setImageStatus(sensor_serial, max_array)
@@ -597,7 +539,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				var group_uuid string
 				var sensor_uuid string
 				var sensor_name string
-				query := fmt.Sprintf(`
+				query = fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
@@ -655,9 +597,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				}
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
-				pubMutex.Unlock()
 			} else { // alarm delay is added
 				mEventEndTimes[sensor_serial] = time.Now().Add(EVENT_DELAY).Unix()
 			}
@@ -730,9 +670,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				}
 				frameJSON, _ := json.Marshal(j_frame)
 				set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-				pubMutex.Lock()
 				client.Publish(set_topic, 1, false, frameJSON)
-				pubMutex.Unlock()
 			}
 			break
 		case "warning":
@@ -804,9 +742,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 			}
 			frameJSON, _ := json.Marshal(j_frame)
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-			pubMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
-			pubMutex.Unlock()
 			break
 		}
 	}
@@ -837,8 +773,6 @@ func handleFrameData(client mqtt.Client, settop_serial string, mac string, senso
 		return
 	}
 }
-
-var connectionMutex sync.RWMutex
 
 func handleConnectionData(client mqtt.Client, settop_serial string, mac string, payloadStr string) {
 	isalive := "0"
@@ -899,10 +833,6 @@ func handleConnectionData(client mqtt.Client, settop_serial string, mac string, 
 				}
 				mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
 			}
-			isCheck := duplicateCheckMessage(status, sensor_serial)
-			if isCheck {
-				continue
-			}
 			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
 			j_frame := map[string]interface{}{
 				"status":      status,
@@ -912,11 +842,50 @@ func handleConnectionData(client mqtt.Client, settop_serial string, mac string, 
 				"settop_uuid": settop_uuid,
 			}
 			frameJSON, _ := json.Marshal(j_frame)
-			connectionMutex.Lock()
+			pubMutex.Lock()
 			client.Publish(set_topic, 1, false, frameJSON)
-			connectionMutex.Unlock()
+			pubMutex.Unlock()
 			mainListMapping = NewMainListResponseMapping()
-			mImageStatus[sensor_serial] = status
+			query = fmt.Sprintf(`
+				UPDATE sensor SET
+					is_alive = '%d'
+				WHERE serial = '%s'
+			`, 0, sensor_serial)
+			_, err = db.Exec(query)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	} else if payloadStr == "1" {
+		var sensor_serial string
+		var sensor_name string
+		status = "normal"
+		query = fmt.Sprintf(`
+			SELECT serial, name  
+			FROM sensor
+			WHERE mac = '%s'
+		`, mac)
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&sensor_serial, &sensor_name)
+			if err != nil {
+				log.Println(err)
+			}
+			mainListMapping = NewMainListResponseMapping()
+
+			query = fmt.Sprintf(`
+				UPDATE sensor SET
+					is_alive = '%d'
+				WHERE serial = '%s'
+			`, 1, sensor_serial)
+			_, err = db.Exec(query)
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}
 }
@@ -973,7 +942,7 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 		message_lev = "이상징후 (점검)"
 	}
 
-	go serverLog(place_name, floor, room, sensor_name, sensor_serial, level_temp+2)
+	serverLog(place_name, floor, room, sensor_name, sensor_serial, level_temp+2)
 
 	var checkEmptyPlace string
 	var checkEmptyFloor string
@@ -1002,6 +971,9 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 }
 
 func handleStatusData(client mqtt.Client, settop_serial string, mac string, sensor_serial string, payloadStr string, msg mqtt.Message) {
+	pubMutex.Lock()
+	defer pubMutex.Unlock()
+
 	mGroupUUIDs = make(map[string][]string)
 
 	j_frame := map[string]interface{}{}
