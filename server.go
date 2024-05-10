@@ -90,21 +90,6 @@ func main() {
 		log.Fatalln("[InitFirebase] initializing app error :", err)
 	}
 
-	// Connect to influxdb
-	_influxdb_client = influxdb2.NewClient(Conf.InfluxDB.Address, Conf.InfluxDB.Token)
-	defer _influxdb_client.Close()
-	_writeAPI = _influxdb_client.WriteAPIBlocking(Conf.InfluxDB.Org, Conf.InfluxDB.Bucket)
-	_queryAPI = _influxdb_client.QueryAPI(Conf.InfluxDB.Org)
-
-	go writeQueue()
-
-	_, err = _influxdb_client.Health(context.Background())
-	if err != nil {
-		log.Fatalf("Failed to connect to InfluxDB: %s", err)
-	}
-
-	log.Println("Connected to InfluxDB")
-
 	// Init logfile
 	logFilePath := filepath.Join(Conf.Log.Dir, Conf.Log.File)
 	lbj := &lumberjack.Logger{
@@ -117,7 +102,22 @@ func main() {
 	}
 	defer lbj.Close()
 	logger = utils.NewLogger(lbj)
-	logger.Title.Printf("Start Server")
+	logger.Title.Printf("Start Trusafer Server")
+
+	// Connect to influxdb
+	_influxdb_client = influxdb2.NewClient(Conf.InfluxDB.Address, Conf.InfluxDB.Token)
+	defer _influxdb_client.Close()
+	_writeAPI = _influxdb_client.WriteAPIBlocking(Conf.InfluxDB.Org, Conf.InfluxDB.Bucket)
+	_queryAPI = _influxdb_client.QueryAPI(Conf.InfluxDB.Org)
+
+	go writeQueue()
+
+	_, err = _influxdb_client.Health(context.Background())
+	if err != nil {
+		logger.Error.Printf("Failed to connect to InfluxDB: %s", err)
+		log.Fatalf("Failed to connect to InfluxDB: %s", err)
+	}
+	logger.Error.Printf("Connected to InfluxDB")
 
 	// Get AES scecret key
 	hash := sha256.New()

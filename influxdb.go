@@ -39,10 +39,12 @@ func flushQueue() {
 	influxdbQueueMtx.Unlock()
 
 	if len(pointsToWrite) > 0 {
+		logger.Info.Printf("queue len : %d", len(pointsToWrite))
 		if Conf.InfluxDB.IsLog {
 			log.Println("queue len : ", len(pointsToWrite))
 		}
 		if err := _writeAPI.WritePoint(context.Background(), pointsToWrite...); err != nil {
+			logger.Error.Printf("Failed to write to InfluxDB: %s", err)
 			log.Println(err)
 		}
 	}
