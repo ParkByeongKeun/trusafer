@@ -117,7 +117,7 @@ func main() {
 		logger.Error.Printf("Failed to connect to InfluxDB: %s", err)
 		log.Fatalf("Failed to connect to InfluxDB: %s", err)
 	}
-	logger.Error.Printf("Connected to InfluxDB")
+	logger.Info.Printf("Connected to InfluxDB")
 
 	// Get AES scecret key
 	hash := sha256.New()
@@ -135,7 +135,7 @@ func main() {
 	opts_broker.SetClientID(clientID).SetTLSConfig(tlsconfig)
 	opts_broker.SetUsername(Conf.Broker.UserId)
 	opts_broker.SetPassword(Conf.Broker.UserPassword)
-	opts_broker.SetCleanSession(false)
+	opts_broker.SetCleanSession(true) // true: clean false:RETAINED
 
 	opts_broker.SetConnectionLostHandler(func(c mqtt.Client, err error) {
 		println("mqtt connection lost error: " + err.Error())
@@ -172,10 +172,10 @@ func main() {
 
 	// Init mariadb
 	dataSource := fmt.Sprintf("%s:%s@tcp(%s)/%s",
-															Conf.Database.Id,
-															Conf.Database.Password,
-															Conf.Database.Address,
-															Conf.Database.Name)
+		Conf.Database.Id,
+		Conf.Database.Password,
+		Conf.Database.Address,
+		Conf.Database.Name)
 	db, err = sql.Open("mysql", dataSource)
 	if err != nil {
 		log.Fatal(err)

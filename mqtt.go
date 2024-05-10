@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -112,24 +111,6 @@ func serverLog(place string, floor string, room string, sensor_name string, sens
 	defer sqlAddRegisterer.Close()
 }
 
-func createSensorDataTable(db *sql.DB, tableName string) error {
-	query := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
-			id int(11) NOT NULL AUTO_INCREMENT,
-			min_temp FLOAT NOT NULL,
-			max_temp FLOAT NOT NULL,
-			date datetime NOT NULL,
-			PRIMARY KEY (id),
-			KEY fk_history_trusafer (id)
-			) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
-	`, tableName)
-	_, err := db.Exec(query)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func initThreshold9Data(sensor_uuid string) {
 	query := fmt.Sprintf(`
 		INSERT IGNORE INTO threshold SET
@@ -191,7 +172,6 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 		var floor string
 		var room string
 		var uuid = uuid.New()
-		createSensorDataTable(db, sensorSerial)
 		query := fmt.Sprintf(`
 			SELECT uuid, place_uuid, floor, room  
 			FROM settop 
@@ -299,7 +279,7 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 		log.Println(err)
 	}
 	message := eventMessage(settopSerial, eventType, sensorSerial)
-	firebaseMessagePush(eventType, message, settopSerial, sensorSerial)
+	firebaseMessagePush(message, settopSerial)
 }
 
 var frameMutex sync.Mutex
@@ -411,6 +391,9 @@ func setImageStatus(sensor_serial string, max_array [9]float64) {
 	thresholds := getThresholdMapping(sensor_serial, sensor_serial)
 	mImageStatus[sensor_serial] = "normal"
 	for i, max_temp := range max_array {
+		if len(thresholds) <= 0 {
+			return
+		}
 		tempWarningStr := thresholds[i].GetTempWarning()
 		tempDangerStr := thresholds[i].GetTempDanger()
 		tempDangerFloat, _ := strconv.ParseFloat(tempDangerStr, 64)
@@ -710,6 +693,10 @@ func handleIpmoduleConnection(client mqtt.Client, settopSerial string, mac strin
 	}
 	defer rows.Close()
 	for rows.Next() {
+		err := rows.Scan(&sensorSerial)
+		if err != nil {
+			log.Println(err)
+		}
 		query = fmt.Sprintf(`
 			UPDATE sensor SET
 				status = '%s'
@@ -720,7 +707,7 @@ func handleIpmoduleConnection(client mqtt.Client, settopSerial string, mac strin
 			log.Println(err)
 		}
 		message := eventMessage(settopSerial, eventType, sensorSerial)
-		firebaseMessagePush(eventType, message, settopSerial, sensorSerial)
+		firebaseMessagePush(message, settopSerial)
 
 	}
 	mainListMapping = NewMainListResponseMapping()
@@ -826,9 +813,9 @@ func eventMessage(settop_serial string, level_temp int, sensor_serial string) st
 	} else if level_temp == 4 {
 		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 연결이 끊겼습니다."
 	} else if level_temp == 5 {
-		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 온라인되었습니다."
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 온라인 상태입니다."
 	} else if level_temp == 6 {
-		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 오프라인되었습니다."
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 오프라인 상태입니다."
 	}
 	return message
 }
@@ -856,26 +843,26 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 			result = 2
 		}
 		mImageStatus[sensor_serial] = string(status)
+		query := fmt.Sprintf(`
+			UPDATE sensor SET
+				status = '%s'
+			WHERE serial = '%s'
+		`, strconv.Itoa(result), sensor_serial)
+		_, err := db.Exec(query)
+		if err != nil {
+			log.Println(err)
+		}
 		if result >= 0 {
 			message := eventMessage(settop_serial, result, sensor_serial)
-			firebaseMessagePush(result, message, settop_serial, sensor_serial)
+			firebaseMessagePush(message, settop_serial)
 		}
 	}
 }
 
-func firebaseMessagePush(result int, message, settop_serial, sensor_serial string) {
-	query := fmt.Sprintf(`
-				UPDATE sensor SET
-					status = '%s'
-				WHERE serial = '%s'
-			`, strconv.Itoa(result), sensor_serial)
-	_, err := db.Exec(query)
-	if err != nil {
-		log.Println(err)
-	}
+func firebaseMessagePush(message, settop_serial string) {
 	var settop_uuid string
 	var group_uuid string
-	query = fmt.Sprintf(`
+	query := fmt.Sprintf(`
 				SELECT uuid 
 				FROM settop 
 				WHERE serial = '%s'
