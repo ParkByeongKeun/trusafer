@@ -3539,3 +3539,142 @@ func (s *server) ReadFirebaseTopicList(ctx context.Context, in *pb.ReadFirebaseT
 	}
 	return response, nil
 }
+
+func (s *server) ReadLocalPushDataSensor(ctx context.Context, in *pb.ReadLocalPushDataSensorRequest) (*pb.ReadLocalPushDataSensorResponse, error) {
+	log.Printf("Received GetReadLocalPushData")
+	response := &pb.ReadLocalPushDataSensorResponse{}
+	var settop_uuid string
+	var group_uuid string
+	var sensor_uuid string
+	var sensor_name string
+	var group_uuids []string
+
+	query := fmt.Sprintf(`
+		SELECT uuid 
+		FROM settop 
+		WHERE serial = '%s'
+	`, in.SettopSerial)
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&settop_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+		query2 := fmt.Sprintf(`
+			SELECT group_uuid 
+			FROM group_gateway 
+			WHERE settop_uuid = '%s'
+		`, settop_uuid)
+		rows2, err := db.Query(query2)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			err := rows2.Scan(&group_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+			group_uuids = append(group_uuids, group_uuid)
+		}
+	}
+
+	query = fmt.Sprintf(`
+		SELECT uuid, name 
+		FROM sensor 
+		WHERE serial = '%s'
+	`, in.SensorSerial)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_uuid, &sensor_name)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+	response.GroupUuidList = group_uuids
+	response.SensorName = sensor_name
+	response.SensorUuid = sensor_uuid
+	response.SettopUuid = settop_uuid
+
+	return response, nil
+}
+
+func (s *server) ReadLocalPushDataIpmodule(ctx context.Context, in *pb.ReadLocalPushDataIpmoduleRequest) (*pb.ReadLocalPushDataIpmoduleResponse, error) {
+	log.Printf("Received GetReadLocalPushData")
+	response := &pb.ReadLocalPushDataIpmoduleResponse{}
+	var settop_uuid string
+	var group_uuid string
+	var sensor_uuid string
+	var sensor_name string
+	var group_uuids []string
+	var sensor_names []string
+	var sensor_uuids []string
+
+	query := fmt.Sprintf(`
+		SELECT uuid 
+		FROM settop 
+		WHERE serial = '%s'
+	`, in.SettopSerial)
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&settop_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+		query2 := fmt.Sprintf(`
+			SELECT group_uuid 
+			FROM group_gateway 
+			WHERE settop_uuid = '%s'
+		`, settop_uuid)
+		rows2, err := db.Query(query2)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows2.Close()
+		for rows2.Next() {
+			err := rows2.Scan(&group_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+			group_uuids = append(group_uuids, group_uuid)
+		}
+	}
+
+	query = fmt.Sprintf(`
+		SELECT uuid, name
+		FROM sensor
+		WHERE mac = '%s'
+	`, in.Mac)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_uuid, &sensor_name)
+		if err != nil {
+			log.Println(err)
+		}
+		sensor_names = append(sensor_names, group_uuid)
+		sensor_uuids = append(sensor_uuids, group_uuid)
+	}
+
+	response.GroupUuidList = group_uuids
+	response.SensorNameList = sensor_names
+	response.SensorUuidList = sensor_uuids
+	response.SettopUuid = settop_uuid
+
+	return response, nil
+}

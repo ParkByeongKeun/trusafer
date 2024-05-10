@@ -41,23 +41,17 @@ func handleMessage(client mqtt.Client, msg mqtt.Message) {
 	case strings.HasPrefix(msg.Topic(), base_topic+"/get/settop_sn/"):
 		handleGetSettop_SN(client, parts, payloadStr)
 
-	case strings.HasPrefix(msg.Topic(), base_topic+"/regist/sensor/"):
-		handleRegistSensor(client, parts[3], parts[4], parts[5], payloadStr)
-
-	case strings.HasPrefix(msg.Topic(), base_topic+"/deregist/sensor/"):
-		handleDeregistSensor(client, parts[3], parts[4], parts[5])
+	case strings.HasPrefix(msg.Topic(), base_topic+"/data/sensor_connection/"):
+		handleSensorConnection(client, parts[3], parts[4], parts[5], msg)
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/data/frame/"):
 		handleFrameData(client, parts[3], parts[4], parts[5], msg)
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/data/connection/"):
-		handleConnectionData(client, parts[3], parts[4], payloadStr)
+		handleIpmoduleConnection(client, parts[3], parts[4], payloadStr)
 
 	case strings.HasPrefix(msg.Topic(), base_topic+"/data/status/"):
 		handleStatusData(client, parts[3], parts[4], parts[5], payloadStr, msg)
-
-	case strings.HasPrefix(msg.Topic(), base_topic+"/data/info/"):
-		handleInfoData(client, parts[3], payloadStr, msg)
 	}
 }
 
@@ -177,208 +171,135 @@ func initThreshold9Data(sensor_uuid string) {
 
 var registMutex sync.Mutex
 
-func handleRegistSensor(client mqtt.Client, settop_serial string, settopMac string, sensorSerial string, payloadStr string) {
-	currentTime := time.Now()
-	formattedTime := currentTime.Format("2006-01-02 15:04:05")
-	var settop_uuid string
-	var place_uuid string
-	var place_name string
-	var floor string
-	var room string
-	var uuid = uuid.New()
-	createSensorDataTable(db, sensorSerial)
-	query := fmt.Sprintf(`
-		SELECT uuid, place_uuid, floor, room  
-		FROM settop 
-		WHERE mac1 = '%s' OR mac2 = '%s'
-	`, settopMac, settopMac)
-	rows, err := db.Query(query)
+func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac string, sensorSerial string, msg mqtt.Message) {
+	j_frame := map[string]interface{}{}
+	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
 		log.Println(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&settop_uuid, &place_uuid, &floor, &room)
-		if err != nil {
-			log.Println(err)
-		}
-	}
-	if settop_uuid == "" {
-		log.Println("settop_uuid not found")
 		return
 	}
-	query = fmt.Sprintf(`
-		SELECT name 
-		FROM place 
-		WHERE uuid = '%s' 
-	`, place_uuid)
-
-	rows, err = db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&place_name)
+	connection, _ := j_frame["connection"].(string)
+	postion, _ := j_frame["pos"].(string)
+	eventType := 0
+	sensorStatus := 0
+	if connection == "1" {
+		currentTime := time.Now()
+		formattedTime := currentTime.Format("2006-01-02 15:04:05")
+		var settop_uuid string
+		var place_uuid string
+		var place_name string
+		var floor string
+		var room string
+		var uuid = uuid.New()
+		createSensorDataTable(db, sensorSerial)
+		query := fmt.Sprintf(`
+			SELECT uuid, place_uuid, floor, room  
+			FROM settop 
+			WHERE mac1 = '%s' OR mac2 = '%s'
+		`, settopMac, settopMac)
+		rows, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
 		}
-	}
-
-	query = fmt.Sprintf(`
-		INSERT INTO sensor
-			SET uuid = '%s', 
-				settop_uuid = '%s',
-				status = '%s',
-				serial = '%s',
-				ip_address = '%s',
-				location = '%s',
-				registered_time = '%s',
-				mac = '%s',
-				name = '%s',
-				type = '%s'
-				
-		ON DUPLICATE KEY UPDATE
-			settop_uuid = VALUES(settop_uuid),
-			status = VALUES(status),
-			ip_address = VALUES(ip_address),
-			location = VALUES(location),
-			registered_time = VALUES(registered_time),
-			mac = VALUES(mac),
-			type = VALUES(type)
-	`,
-		uuid.String(), settop_uuid, "0",
-		sensorSerial, "", "",
-		formattedTime, settopMac, sensorSerial, payloadStr,
-	)
-	sqlAddSensor, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	var get_sensor_uuid string
-	var sensor_name string
-	query = fmt.Sprintf(`
-		SELECT uuid, name 
-		FROM sensor 
-		WHERE serial = '%s'
-	`, sensorSerial)
-	rows, err = db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&get_sensor_uuid, &sensor_name)
-		if err != nil {
-			log.Println(err)
-		}
-	}
-	mainListMapping = NewMainListResponseMapping()
-	initThreshold9Data(get_sensor_uuid)
-	defer sqlAddSensor.Close()
-	set_topic := base_topic + "/get/info/" + settop_serial + "/" + settopMac
-	message := "info"
-	registMutex.Lock()
-	client.Publish(set_topic, 1, false, message)
-	registMutex.Unlock()
-	mStatus[sensorSerial] = ""
-}
-
-func handleDeregistSensor(client mqtt.Client, settopSerial string, settopMac string, sensorSerial string) {
-	log.Println("handleDeregistSensor called: ", sensorSerial)
-	mainListMapping = NewMainListResponseMapping()
-	var place_uuid string
-	var place_name string
-	var floor string
-	var room string
-	query := fmt.Sprintf(`
-		SELECT place_uuid, floor, room  
-		FROM settop 
-		WHERE serial = '%s' 
-	`, settopSerial)
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&place_uuid, &floor, &room)
-		if err != nil {
-			log.Println(err)
-		}
-	}
-
-	query = fmt.Sprintf(`
-		SELECT name 
-		FROM place 
-		WHERE uuid = '%s' 
-	`, place_uuid)
-	rows, err = db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&place_name)
-		if err != nil {
-			log.Println(err)
-		}
-	}
-
-	var sensor_name string
-	var group_uuid string
-	var sensor_uuid string
-	var settop_uuid string
-
-	query = fmt.Sprintf(`
-		SELECT uuid, name, settop_uuid
-		FROM sensor
-		WHERE serial = '%s'
-	`, sensorSerial)
-	rows, err = db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&sensor_uuid, &sensor_name, &settop_uuid)
-		if err != nil {
-			log.Println(err)
-		}
-
-		query2 := fmt.Sprintf(`
-			SELECT group_uuid
-			FROM group_gateway
-			WHERE settop_uuid = '%s'
-		`, settop_uuid)
-		rows2, err := db.Query(query2)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows2.Close()
-		for rows2.Next() {
-			err := rows2.Scan(&group_uuid)
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&settop_uuid, &place_uuid, &floor, &room)
 			if err != nil {
 				log.Println(err)
 			}
-			mGroupUUIDs[sensorSerial] = append(mGroupUUIDs[sensorSerial], group_uuid)
 		}
-		set_topic := base_topic + "/data/status/" + settopSerial + "/" + settopMac + "/" + sensorSerial
-		j_frame := map[string]interface{}{
-			"status":      "inspection",
-			"group_uuid":  mGroupUUIDs[sensorSerial],
-			"sensor_name": sensor_name,
-			"sensor_uuid": sensor_uuid,
-			"settop_uuid": settop_uuid,
+		if settop_uuid == "" {
+			log.Println("settop_uuid not found")
+			return
 		}
-		frameJSON, _ := json.Marshal(j_frame)
-		pubMutex.Lock()
-		client.Publish(set_topic, 1, false, frameJSON)
-		pubMutex.Unlock()
+		query = fmt.Sprintf(`
+			SELECT name 
+			FROM place 
+			WHERE uuid = '%s' 
+		`, place_uuid)
+
+		rows, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&place_name)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+
+		query = fmt.Sprintf(`
+			INSERT INTO sensor
+				SET uuid = '%s', 
+					settop_uuid = '%s',
+					status = '%s',
+					serial = '%s',
+					ip_address = '%s',
+					location = '%s',
+					registered_time = '%s',
+					mac = '%s',
+					name = '%s',
+					type = '%s'
+					
+			ON DUPLICATE KEY UPDATE
+				settop_uuid = VALUES(settop_uuid),
+				status = VALUES(status),
+				ip_address = VALUES(ip_address),
+				location = VALUES(location),
+				registered_time = VALUES(registered_time),
+				mac = VALUES(mac),
+				type = VALUES(type)
+		`,
+			uuid.String(), settop_uuid, "0",
+			sensorSerial, "", "",
+			formattedTime, settopMac, sensorSerial, postion,
+		)
+		sqlAddSensor, err := db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		var get_sensor_uuid string
+		var sensor_name string
+		query = fmt.Sprintf(`
+			SELECT uuid, name 
+			FROM sensor 
+			WHERE serial = '%s'
+		`, sensorSerial)
+		rows, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&get_sensor_uuid, &sensor_name)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+		mainListMapping = NewMainListResponseMapping()
+		initThreshold9Data(get_sensor_uuid)
+		defer sqlAddSensor.Close()
+		mStatus[sensorSerial] = ""
+		eventType = 3 //log online
+		sensorStatus = 0
+	} else {
+		eventType = 4 //log offline
+		sensorStatus = 3
 	}
+	query := fmt.Sprintf(`
+		UPDATE sensor SET
+			status = '%s'
+		WHERE serial = '%s'
+	`, strconv.Itoa(sensorStatus), sensorSerial)
+	_, err = db.Exec(query)
+	if err != nil {
+		log.Println(err)
+	}
+	message := eventMessage(settopSerial, eventType, sensorSerial)
+	firebaseMessagePush(eventType, message, settopSerial, sensorSerial)
 }
 
 var frameMutex sync.Mutex
@@ -506,27 +427,6 @@ func setImageStatus(sensor_serial string, max_array [9]float64) {
 func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_serial string) error {
 	pubMutex.Lock()
 	defer pubMutex.Unlock()
-	var isSensorAlive int64
-	query := fmt.Sprintf(`
-		SELECT is_alive
-		FROM sensor 
-		WHERE serial = '%s'
-	`, sensor_serial)
-	rows, err := db.Query(query)
-	if err != nil {
-		log.Println(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		err := rows.Scan(&isSensorAlive)
-		if err != nil {
-			log.Println(err)
-		}
-		if isSensorAlive == 0 {
-			return nil
-		}
-	}
-
 	mGroupUUIDs = make(map[string][]string)
 	EVENT_DELAY := time.Duration(10)
 	setImageStatus(sensor_serial, max_array)
@@ -539,7 +439,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 				var group_uuid string
 				var sensor_uuid string
 				var sensor_name string
-				query = fmt.Sprintf(`
+				query := fmt.Sprintf(`
 					SELECT uuid 
 					FROM settop 
 					WHERE serial = '%s'
@@ -749,7 +649,7 @@ func publishStatus(min_array, max_array [9]float64, settop_serial, mac, sensor_s
 	return nil
 }
 
-func handleFrameData(client mqtt.Client, settop_serial string, mac string, sensor_serial string, msg mqtt.Message) {
+func handleFrameData(client mqtt.Client, settopSerial string, mac string, sensorSerial string, msg mqtt.Message) {
 	frameMutex.Lock()
 	defer frameMutex.Unlock()
 	j_frame := map[string]interface{}{}
@@ -766,143 +666,96 @@ func handleFrameData(client mqtt.Client, settop_serial string, mac string, senso
 		return
 	}
 
-	publishStatus(min_array, max_array, settop_serial, mac, sensor_serial)
-	err = saveFrame(sensor_serial, imgData, minValue, maxValue)
+	publishStatus(min_array, max_array, settopSerial, mac, sensorSerial)
+	err = saveFrame(sensorSerial, imgData, minValue, maxValue)
 	if err != nil {
 		log.Println("Error saving raw data to file:", err)
 		return
 	}
 }
 
-func handleConnectionData(client mqtt.Client, settop_serial string, mac string, payloadStr string) {
-	isalive := "0"
-	if payloadStr == "0" {
-		isalive = "0"
-	} else {
-		isalive = "1"
-	}
+func handleIpmoduleConnection(client mqtt.Client, settopSerial string, mac string, payloadStr string) {
 	query := fmt.Sprintf(`
 		UPDATE settop SET
 			is_alive = '%s'
 		WHERE serial = '%s'
-	`, isalive, settop_serial)
+	`, payloadStr, settopSerial)
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
-	var status = ""
+	eventType := 0
+	sensorStatus := 0
 	if payloadStr == "0" {
-		status = "inspection"
-		var settop_uuid string
-		var group_uuid string
-		var sensor_uuid string
-		var sensor_name string
-		var sensor_serial string
-
-		query = fmt.Sprintf(`
-			SELECT uuid, name, serial, settop_uuid
-			FROM sensor
-			WHERE mac = '%s'
-		`, mac)
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&sensor_uuid, &sensor_name, &sensor_serial, &settop_uuid)
-			if err != nil {
-				log.Println(err)
-			}
-
-			query2 := fmt.Sprintf(`
-				SELECT group_uuid
-				FROM group_gateway
-				WHERE settop_uuid = '%s'
-			`, settop_uuid)
-
-			rows2, err := db.Query(query2)
-			if err != nil {
-				log.Println(err)
-			}
-			defer rows2.Close()
-			for rows2.Next() {
-				err := rows2.Scan(&group_uuid)
-				if err != nil {
-					log.Println(err)
-				}
-				mGroupUUIDs[sensor_serial] = append(mGroupUUIDs[sensor_serial], group_uuid)
-			}
-			set_topic := base_topic + "/data/status/" + settop_serial + "/" + mac + "/" + sensor_serial
-			j_frame := map[string]interface{}{
-				"status":      status,
-				"group_uuid":  mGroupUUIDs[sensor_serial],
-				"sensor_name": sensor_name,
-				"sensor_uuid": sensor_uuid,
-				"settop_uuid": settop_uuid,
-			}
-			frameJSON, _ := json.Marshal(j_frame)
-			pubMutex.Lock()
-			client.Publish(set_topic, 1, false, frameJSON)
-			pubMutex.Unlock()
-			mainListMapping = NewMainListResponseMapping()
-			query = fmt.Sprintf(`
-				UPDATE sensor SET
-					is_alive = '%d'
-				WHERE serial = '%s'
-			`, 0, sensor_serial)
-			_, err = db.Exec(query)
-			if err != nil {
-				log.Println(err)
-			}
-		}
+		eventType = 6 //offline
+		sensorStatus = 3
 	} else if payloadStr == "1" {
-		var sensor_serial string
-		var sensor_name string
-		status = "normal"
+		eventType = 5 //online
+		sensorStatus = 0
+	}
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	var sensorSerial string
+	query = fmt.Sprintf(`
+		SELECT serial
+		FROM sensor
+		WHERE mac = '%s'
+	`, mac)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
 		query = fmt.Sprintf(`
-			SELECT serial, name  
-			FROM sensor
-			WHERE mac = '%s'
-		`, mac)
-		rows, err := db.Query(query)
+			UPDATE sensor SET
+				status = '%s'
+			WHERE serial = '%s'
+		`, strconv.Itoa(sensorStatus), sensorSerial)
+		_, err = db.Exec(query)
 		if err != nil {
 			log.Println(err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&sensor_serial, &sensor_name)
-			if err != nil {
-				log.Println(err)
-			}
-			mainListMapping = NewMainListResponseMapping()
+		message := eventMessage(settopSerial, eventType, sensorSerial)
+		firebaseMessagePush(eventType, message, settopSerial, sensorSerial)
 
-			query = fmt.Sprintf(`
-				UPDATE sensor SET
-					is_alive = '%d'
-				WHERE serial = '%s'
-			`, 1, sensor_serial)
-			_, err = db.Exec(query)
-			if err != nil {
-				log.Println(err)
-			}
-		}
 	}
+	mainListMapping = NewMainListResponseMapping()
 }
 
-func eventMessage(settop_serial string, level_temp int, sensor_name string, sensor_serial string) string {
+func eventMessage(settop_serial string, level_temp int, sensor_serial string) string {
 	var place_uuid string
 	var room string
 	var floor string
 	var place_name string
 	var message string
-	msg_formattedTime := time.Now().Format("2006년 01월 02일 15시 04분 05초")
+	var sensor_name string
 	query := fmt.Sprintf(`
+		SELECT name 
+		FROM sensor 
+		WHERE serial = '%s'
+	`, sensor_serial)
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_name)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+	msg_formattedTime := time.Now().Format("2006년 01월 02일 15시 04분 05초")
+	query = fmt.Sprintf(`
 		SELECT place_uuid, room, floor  
 		FROM settop 
 		WHERE serial = '%s' 
 	`, settop_serial)
-	rows, err := db.Query(query)
+	rows, err = db.Query(query)
 	if err != nil {
 		log.Println(err)
 	}
@@ -938,11 +791,13 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 		message_lev = "이상징후 (주의)"
 	} else if level_temp == 2 {
 		message_lev = "이상징후 (위험)"
-	} else if level_temp == 3 {
-		message_lev = "이상징후 (점검)"
 	}
 
-	serverLog(place_name, floor, room, sensor_name, sensor_serial, level_temp+2)
+	serverLog(place_name, floor, room, sensor_name, sensor_serial, level_temp)
+
+	if level_temp > 7 {
+		return ""
+	}
 
 	var checkEmptyPlace string
 	var checkEmptyFloor string
@@ -966,6 +821,14 @@ func eventMessage(settop_serial string, level_temp int, sensor_name string, sens
 	message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서에서 " + message_lev + "가 발견되었습니다. 해당 위치를 확인하시기 바랍니다."
 	if level_temp == 0 {
 		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 정상입니다."
+	} else if level_temp == 3 {
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 연결되었습니다."
+	} else if level_temp == 4 {
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 연결이 끊겼습니다."
+	} else if level_temp == 5 {
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 온라인되었습니다."
+	} else if level_temp == 6 {
+		message = msg_formattedTime + " " + checkEmptyPlace + sensor_name + " 센서가 오프라인되었습니다."
 	}
 	return message
 }
@@ -991,110 +854,76 @@ func handleStatusData(client mqtt.Client, settop_serial string, mac string, sens
 			result = 1
 		} else if string(status) == "danger" {
 			result = 2
-		} else if string(status) == "inspection" {
-			result = 3
 		}
 		mImageStatus[sensor_serial] = string(status)
 		if result >= 0 {
-			var sensor_name string
-			query := fmt.Sprintf(`
-				SELECT name 
-				FROM sensor 
-				WHERE serial = '%s'
-			`, sensor_serial)
-			rows, err := db.Query(query)
-			if err != nil {
-				log.Println(err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				err := rows.Scan(&sensor_name)
-				if err != nil {
-					log.Println(err)
-				}
-			}
-			query1 := fmt.Sprintf(`
-				UPDATE sensor SET
-					status = '%s'
-				WHERE serial = '%s'
-			`, strconv.Itoa(result), sensor_serial)
-			_, err = db.Exec(query1)
-			if err != nil {
-				log.Println(err)
-			}
-			message := eventMessage(settop_serial, result, sensor_name, sensor_serial)
-			var settop_uuid string
-			var group_uuid string
-			query = fmt.Sprintf(`
-				SELECT uuid 
-				FROM settop 
-				WHERE serial = '%s'
-			`, settop_serial)
-			rows1, err := db.Query(query)
-			if err != nil {
-				log.Println(err)
-			}
-			defer rows1.Close()
-			for rows1.Next() {
-				err := rows1.Scan(&settop_uuid)
-				if err != nil {
-					log.Println(err)
-				}
-
-				query2 := fmt.Sprintf(`
-					SELECT group_uuid 
-					FROM group_gateway 
-					WHERE settop_uuid = '%s'
-				`, settop_uuid)
-				rows2, err := db.Query(query2)
-				if err != nil {
-					log.Println(err)
-				}
-				defer rows2.Close()
-
-				for rows2.Next() {
-					err := rows2.Scan(&group_uuid)
-					if err != nil {
-						log.Println(err)
-					}
-					firebaseutil.SendMessageAsync("Trusafer", message, "style", group_uuid)
-				}
-			}
-			var group_master_uuid string
-			query = "SELECT uuid FROM group_ WHERE name = 'master'"
-			rows, err = db.Query(query)
-			if err != nil {
-				log.Println(err)
-			}
-			defer rows.Close()
-			for rows.Next() {
-				err := rows.Scan(&group_master_uuid)
-				if err != nil {
-					log.Println(err)
-				}
-			}
-			firebaseutil.SendMessageAsync("Trusafer", message, "style", group_master_uuid)
-			mainListMapping = NewMainListResponseMapping()
+			message := eventMessage(settop_serial, result, sensor_serial)
+			firebaseMessagePush(result, message, settop_serial, sensor_serial)
 		}
 	}
 }
 
-func handleInfoData(client mqtt.Client, settop_serial string, payloadStr string, msg mqtt.Message) {
-	j_info := map[string]interface{}{}
-	err := json.Unmarshal(msg.Payload(), &j_info)
-	if err != nil {
-		log.Println(err)
-	}
-	fw_version, _ := j_info["fw_version"].(string)
+func firebaseMessagePush(result int, message, settop_serial, sensor_serial string) {
 	query := fmt.Sprintf(`
-		UPDATE settop SET
-		fw_version = '%s'
-		WHERE serial = '%s'
-	`, fw_version, settop_serial)
-	_, err = db.Exec(query)
+				UPDATE sensor SET
+					status = '%s'
+				WHERE serial = '%s'
+			`, strconv.Itoa(result), sensor_serial)
+	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
+	var settop_uuid string
+	var group_uuid string
+	query = fmt.Sprintf(`
+				SELECT uuid 
+				FROM settop 
+				WHERE serial = '%s'
+			`, settop_serial)
+	rows1, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows1.Close()
+	for rows1.Next() {
+		err := rows1.Scan(&settop_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+
+		query2 := fmt.Sprintf(`
+					SELECT group_uuid 
+					FROM group_gateway 
+					WHERE settop_uuid = '%s'
+				`, settop_uuid)
+		rows2, err := db.Query(query2)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows2.Close()
+
+		for rows2.Next() {
+			err := rows2.Scan(&group_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+			firebaseutil.SendMessageAsync("Trusafer", message, "style", group_uuid)
+		}
+	}
+	var group_master_uuid string
+	query = "SELECT uuid FROM group_ WHERE name = 'master'"
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&group_master_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+	firebaseutil.SendMessageAsync("Trusafer", message, "style", group_master_uuid)
 	mainListMapping = NewMainListResponseMapping()
 }
 

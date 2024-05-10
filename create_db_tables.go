@@ -105,8 +105,7 @@ func createDBTablesIfNotExist() error {
 			registered_time datetime DEFAULT NULL,
 			mac varchar(255) DEFAULT NULL,
 			name varchar(255) DEFAULT NULL,
-			type varchar(36) DEFAULT NULL,
-			is_alive int(11) DEFAULT NULL,
+			type varchar(36) DEFAULT NULL
 			PRIMARY KEY (uuid)
 		) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
 	`)
