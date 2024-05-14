@@ -152,18 +152,25 @@ func initThreshold9Data(sensor_uuid string) {
 
 var registMutex sync.Mutex
 
-func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac string, sensorSerial string, msg mqtt.Message) {
+func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac string, pos string, msg mqtt.Message) {
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	connection, _ := j_frame["connection"].(string)
-	postion, _ := j_frame["pos"].(string)
+	connection, _ := j_frame["connection"].(float64)
+
+	position := pos
+	sensorSerial, ok := j_frame["sn"].(string)
+	if !ok {
+		log.Println("sensorSerial key not found")
+		return
+	}
 	eventType := 0
 	sensorStatus := 0
-	if connection == "1" {
+
+	if connection == 1 {
 		currentTime := time.Now()
 		formattedTime := currentTime.Format("2006-01-02 15:04:05")
 		var settop_uuid string
@@ -234,8 +241,8 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 				type = VALUES(type)
 		`,
 			uuid.String(), settop_uuid, "0",
-			sensorSerial, "", "",
-			formattedTime, settopMac, sensorSerial, postion,
+			string(sensorSerial), "", "",
+			formattedTime, settopMac, string(sensorSerial), position,
 		)
 		sqlAddSensor, err := db.Query(query)
 		if err != nil {
@@ -247,7 +254,7 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 			SELECT uuid, name 
 			FROM sensor 
 			WHERE serial = '%s'
-		`, sensorSerial)
+		`, string(sensorSerial))
 		rows, err = db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -262,7 +269,7 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 		mainListMapping = NewMainListResponseMapping()
 		initThreshold9Data(get_sensor_uuid)
 		defer sqlAddSensor.Close()
-		mStatus[sensorSerial] = ""
+		mStatus[string(sensorSerial)] = ""
 		eventType = 3 //log online
 		sensorStatus = 0
 	} else {
@@ -273,12 +280,12 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 		UPDATE sensor SET
 			status = '%s'
 		WHERE serial = '%s'
-	`, strconv.Itoa(sensorStatus), sensorSerial)
+	`, strconv.Itoa(sensorStatus), string(sensorSerial))
 	_, err = db.Exec(query)
 	if err != nil {
 		log.Println(err)
 	}
-	message := eventMessage(settopSerial, eventType, sensorSerial)
+	message := eventMessage(settopSerial, eventType, string(sensorSerial))
 	firebaseMessagePush(message, settopSerial)
 }
 
@@ -294,7 +301,7 @@ func saveFrame(sensor_serial string, rawData []byte, minValue, maxValue float64)
 
 	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
 	influxdbQueueMtx.Lock()
-	queue <- point
+	queue.Push(point)
 	influxdbQueueMtx.Unlock()
 	return nil
 }

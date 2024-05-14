@@ -28,7 +28,6 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
-	"github.com/influxdata/influxdb-client-go/v2/api/write"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -39,7 +38,6 @@ func init() {
 	mStatus = make(map[string]string)
 	mImageStatus = make(map[string]string)
 	mGroupUUIDs = make(map[string][]string)
-	queue = make(chan *write.Point, queueSize)
 }
 
 type SensorData struct {
@@ -105,6 +103,7 @@ func main() {
 	logger.Title.Printf("Start Trusafer Server")
 
 	// Connect to influxdb
+	queue = *NewQueue()
 	_influxdb_client = influxdb2.NewClient(Conf.InfluxDB.Address, Conf.InfluxDB.Token)
 	defer _influxdb_client.Close()
 	_writeAPI = _influxdb_client.WriteAPIBlocking(Conf.InfluxDB.Org, Conf.InfluxDB.Bucket)
@@ -155,6 +154,7 @@ func main() {
 		startSubscriber(client, base_topic+"/data/connection/#", &wg)
 		startSubscriber(client, base_topic+"/data/status/#", &wg)
 		startSubscriber(client, base_topic+"/data/info/#", &wg)
+		startSubscriber(client, base_topic+"/data/sensor_connection/#", &wg)
 
 		wg.Wait()
 	})
