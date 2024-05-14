@@ -436,7 +436,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 		log.Println("Invalid authentication token")
 		return nil, status.Errorf(codes.Unauthenticated, "Invalid authentication token")
 	}
-	log.Printf("Received GetRegisterer")
 	response := &pb.ReadRegistererResponse{}
 	var uuid_ string
 	var auth_email string
@@ -658,7 +657,6 @@ func (s *server) ReadRegisterer(ctx context.Context, in *pb.ReadRegistererReques
 }
 
 func (s *server) ReadRegistererList(ctx context.Context, in *pb.ReadRegistererListRequest) (*pb.ReadRegistererListResponse, error) {
-	log.Printf("Received GetRegistererList: success")
 	response := &pb.ReadRegistererListResponse{}
 	var uuid string
 	var authEmail string
@@ -784,7 +782,6 @@ func (s *server) DeletePlace(ctx context.Context, in *pb.DeletePlaceRequest) (*p
 }
 
 func (s *server) ReadPlace(ctx context.Context, in *pb.ReadPlaceRequest) (*pb.ReadPlaceResponse, error) {
-	log.Printf("Received GetPlace: %s", in.GetPlaceUuid())
 	response := &pb.ReadPlaceResponse{}
 	var uuid string
 	var name string
@@ -823,7 +820,6 @@ func (s *server) ReadPlace(ctx context.Context, in *pb.ReadPlaceRequest) (*pb.Re
 }
 
 func (s *server) ReadPlaceList(ctx context.Context, in *pb.ReadPlaceListRequest) (*pb.ReadPlaceListResponse, error) {
-	log.Printf("Received GetPlaceList")
 	response := &pb.ReadPlaceListResponse{}
 	var uuid string
 	var name string
@@ -1127,7 +1123,6 @@ func (s *server) ReadSettop(ctx context.Context, in *pb.ReadSettopRequest) (*pb.
 }
 
 func (s *server) ReadSettopList(ctx context.Context, in *pb.ReadSettopListRequest) (*pb.ReadSettopListResponse, error) {
-	log.Printf("Received GetSettopList: success")
 	response := &pb.ReadSettopListResponse{}
 	var group_settop_uuid sql.NullString
 	var uuid string
@@ -1414,7 +1409,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			return nil, status.Errorf(codes.PermissionDenied, "Err Permission")
 		}
 	}
-	log.Printf("Received UpdateSensor: %s", in.Sensor.GetUuid())
 	query := fmt.Sprintf(`
 		UPDATE sensor SET
 			settop_uuid = '%s',
@@ -1594,7 +1588,6 @@ func (s *server) DeleteSensor(ctx context.Context, in *pb.DeleteSensorRequest) (
 }
 
 func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.ReadSensorResponse, error) {
-	log.Printf("Received GetSensor: %s", in.GetSensorUuid())
 	response := &pb.ReadSensorResponse{}
 
 	var uuid string
@@ -1724,7 +1717,6 @@ func (s *server) ReadSensor(ctx context.Context, in *pb.ReadSensorRequest) (*pb.
 }
 
 func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListRequest) (*pb.ReadSensorListResponse, error) {
-	log.Printf("Received GetSensorList: success")
 	response := &pb.ReadSensorListResponse{}
 	var uuid string
 	var settop_uuid string
@@ -1833,7 +1825,6 @@ func (s *server) ReadSensorList(ctx context.Context, in *pb.ReadSensorListReques
 }
 
 func (s *server) ReadHistoryList(ctx context.Context, in *pb.ReadHistoryListRequest) (*pb.ReadHistoryListResponse, error) {
-	log.Printf("Received GetHistoryList: called")
 	response := &pb.ReadHistoryListResponse{}
 	// var min_temp float32
 	// var max_temp float32
@@ -2101,7 +2092,6 @@ func (s *server) DeleteGroup(ctx context.Context, in *pb.DeleteGroupRequest) (*p
 }
 
 func (s *server) ReadGroup(ctx context.Context, in *pb.ReadGroupRequest) (*pb.ReadGroupResponse, error) {
-	log.Printf("Received GetGroup")
 	response := &pb.ReadGroupResponse{}
 	var uuid string
 	var name string
@@ -2132,7 +2122,6 @@ func (s *server) ReadGroup(ctx context.Context, in *pb.ReadGroupRequest) (*pb.Re
 }
 
 func (s *server) ReadGroupList(ctx context.Context, in *pb.ReadGroupListRequest) (*pb.ReadGroupListResponse, error) {
-	log.Printf("Received GetGroupList: success")
 	response := &pb.ReadGroupListResponse{}
 	var uuid string
 	var name string
@@ -2310,7 +2299,6 @@ func (s *server) DeletePermission(ctx context.Context, in *pb.DeletePermissionRe
 }
 
 func (s *server) ReadPermissionList(ctx context.Context, in *pb.ReadPermissionListRequest) (*pb.ReadPermissionListResponse, error) {
-	log.Printf("Received GetPermissionList: success")
 	response := &pb.ReadPermissionListResponse{}
 	query := `
 		SELECT uuid, name, user, permission, settop_create, sensor_info, ip_module, threshold, sensor_history  
@@ -2358,7 +2346,6 @@ func (s *server) ReadPermissionList(ctx context.Context, in *pb.ReadPermissionLi
 }
 
 func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.FindEmailResponse, error) {
-	log.Printf("Find Email")
 	response := &pb.FindEmailResponse{}
 	var auth_email string
 	var phone_number_aes256 []byte
@@ -2499,7 +2486,6 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 }
 
 func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebaseRequest) (*pb.SubscribeFirebaseResponse, error) {
-	log.Printf("SubscribeFirebase called ")
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
@@ -2580,7 +2566,6 @@ func (s *server) SubscribeFirebase(ctx context.Context, in *pb.SubscribeFirebase
 }
 
 func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogListResponse, error) {
-	log.Printf("LogList called")
 	response := &pb.LogListResponse{}
 	mainListResponse, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
 	if ok {
@@ -2833,7 +2818,6 @@ func (s *server) DeleteRegistererGroup(ctx context.Context, in *pb.DeleteRegiste
 }
 
 func (s *server) ReadRegistererGroupList(ctx context.Context, in *pb.ReadRegistererGroupListRequest) (*pb.ReadRegistererGroupListResponse, error) {
-	log.Printf("Received GetGroupList: success")
 	response := &pb.ReadRegistererGroupListResponse{}
 	var registerer_uuid sql.NullString
 	var uuid_ string
@@ -3039,7 +3023,6 @@ func (s *server) DeleteSettopGroup(ctx context.Context, in *pb.DeleteSettopGroup
 }
 
 func (s *server) ReadSettopGroupList(ctx context.Context, in *pb.ReadSettopGroupListRequest) (*pb.ReadSettopGroupListResponse, error) {
-	log.Printf("Received GetSettopGroupList: success")
 	response := &pb.ReadSettopGroupListResponse{}
 	var group_uuid string
 	var uuid_ string
@@ -3140,7 +3123,6 @@ func roundToDecimalPlaces(value float32, decimalPlaces int) float32 {
 }
 
 func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest) (*pb.MainGroupListResponse, error) {
-	log.Printf("Received MainGroupList")
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Errorf(codes.Unauthenticated, "not read metadata")
@@ -3250,7 +3232,6 @@ func (s *server) MainGroupList(ctx context.Context, in *pb.MainGroupListRequest)
 }
 
 func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListRequest) (*pb.MainSettopListResponse, error) {
-	log.Printf("Received MainSettopListResponse")
 	response := &pb.MainSettopListResponse{
 		Settops: make(map[string]*pb.MainSettop),
 	}
@@ -3486,7 +3467,6 @@ func (s *server) MainSettopList(ctx context.Context, in *pb.MainSettopListReques
 }
 
 func (s *server) ReadFirebaseTopicList(ctx context.Context, in *pb.ReadFirebaseTopicListRequest) (*pb.ReadFirebaseTopicListResponse, error) {
-	log.Printf("Received ReadFirebaseTopicListResponse")
 	response := &pb.ReadFirebaseTopicListResponse{}
 	registererinfo, err := s.ReadRegisterer(ctx, &pb.ReadRegistererRequest{
 		Name: "check",
@@ -3541,7 +3521,6 @@ func (s *server) ReadFirebaseTopicList(ctx context.Context, in *pb.ReadFirebaseT
 }
 
 func (s *server) ReadLocalPushDataSensor(ctx context.Context, in *pb.ReadLocalPushDataSensorRequest) (*pb.ReadLocalPushDataSensorResponse, error) {
-	log.Printf("Received GetReadLocalPushData")
 	response := &pb.ReadLocalPushDataSensorResponse{}
 	var settop_uuid string
 	var group_uuid string
@@ -3608,7 +3587,6 @@ func (s *server) ReadLocalPushDataSensor(ctx context.Context, in *pb.ReadLocalPu
 }
 
 func (s *server) ReadLocalPushDataIpmodule(ctx context.Context, in *pb.ReadLocalPushDataIpmoduleRequest) (*pb.ReadLocalPushDataIpmoduleResponse, error) {
-	log.Printf("Received GetReadLocalPushData")
 	response := &pb.ReadLocalPushDataIpmoduleResponse{}
 	var settop_uuid string
 	var group_uuid string

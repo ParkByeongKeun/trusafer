@@ -92,13 +92,13 @@ func SendMessage(title, body, style, topic string) error {
 		Topic: topic,
 	}
 
-	response, err := _firebase_client.Send(_firebase_ctx, message)
+	_, err := _firebase_client.Send(_firebase_ctx, message)
 	if err != nil {
 		log.Printf("Error sending message to topic %s: %v", topic, err)
 		return err
 	}
 
-	log.Printf("Successfully sent message to topic %s. Message ID: %s", topic, response)
+	// log.Printf("Successfully sent message to topic %s. Message ID: %s", topic, response)
 	return nil
 }
 
