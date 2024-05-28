@@ -150,8 +150,6 @@ func initThreshold9Data(sensor_uuid string) {
 	defer sqlThresh.Close()
 }
 
-var registMutex sync.Mutex
-
 func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac string, pos string, msg mqtt.Message) {
 	j_frame := map[string]interface{}{}
 	err := json.Unmarshal(msg.Payload(), &j_frame)

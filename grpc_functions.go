@@ -3645,8 +3645,8 @@ func (s *server) ReadLocalPushDataIpmodule(ctx context.Context, in *pb.ReadLocal
 		if err != nil {
 			log.Println(err)
 		}
-		sensor_names = append(sensor_names, group_uuid)
-		sensor_uuids = append(sensor_uuids, group_uuid)
+		sensor_names = append(sensor_names, sensor_name)
+		sensor_uuids = append(sensor_uuids, sensor_uuid)
 	}
 
 	response.GroupUuidList = group_uuids
