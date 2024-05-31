@@ -2569,7 +2569,7 @@ func (s *server) LogList(ctx context.Context, in *pb.LogListRequest) (*pb.LogLis
 	response := &pb.LogListResponse{}
 	mainListResponse, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
 	if ok {
-		fmt.Println("MainListResponse found")
+		// fmt.Println("MainListResponse found")
 	} else {
 		mainListResponse, _ = s.MainList(ctx, &pb.MainListRequest{
 			RegistererUuid: in.GetRegistererUuid(),

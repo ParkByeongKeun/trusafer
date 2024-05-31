@@ -59,18 +59,19 @@ func flushQueue() {
 	influxdbQueueMtx.Lock()
 	var pointsToWrite []*write.Point
 	for queue.Size() > 0 {
-		logger.Info.Printf("queue len : %d", len(pointsToWrite))
-		if Conf.InfluxDB.IsLog {
-			log.Println("queue len : ", len(pointsToWrite))
-		}
 		_point := queue.Pop()
 		point := _point.(*write.Point)
 		pointsToWrite = append(pointsToWrite, point)
+		if Conf.InfluxDB.IsLog {
+			log.Println("queue len : ", len(pointsToWrite))
+		}
+	}
+	influxdbQueueMtx.Unlock()
 
-		if err := _writeAPI.WritePoint(context.Background(), pointsToWrite...); err != nil {
+	for _, point := range pointsToWrite {
+		if err := _writeAPI.WritePoint(context.Background(), point); err != nil {
 			logger.Error.Printf("Failed to write to InfluxDB: %s", err)
 			log.Println(err)
 		}
 	}
-	influxdbQueueMtx.Unlock()
 }
