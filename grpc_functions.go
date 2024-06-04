@@ -2396,10 +2396,8 @@ func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.Fi
 func (s *server) MainList(ctx context.Context, in *pb.MainListRequest) (*pb.MainListResponse, error) {
 	response, ok := mainListMapping.GetMapping(in.GetRegistererUuid())
 	if ok {
-		fmt.Println("MainListResponse found")
 		return response, nil
 	} else {
-		fmt.Println("MainListResponse not found.")
 		response := &pb.MainListResponse{}
 		placeResponse, err := s.ReadPlaceList(ctx, &pb.ReadPlaceListRequest{})
 		if err != nil {

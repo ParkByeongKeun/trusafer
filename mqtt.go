@@ -300,9 +300,6 @@ func saveFrame(sensor_serial string, rawData []byte, minValue, maxValue float64)
 	point := write.NewPoint(sensor_serial, nil, fields, time.Now())
 	influxdbQueueMtx.Lock()
 	queue.Push(point)
-	if Conf.InfluxDB.IsLog {
-		log.Println("====== push ====== ", sensor_serial)
-	}
 	influxdbQueueMtx.Unlock()
 	return nil
 }
