@@ -663,11 +663,17 @@ func handleFrameData(client mqtt.Client, settopSerial string, mac string, sensor
 }
 
 func handleIpmoduleConnection(client mqtt.Client, settopSerial string, mac string, payloadStr string) {
+	settop_is_alive := ""
+	if payloadStr == "0" {
+		settop_is_alive = "0"
+	} else {
+		settop_is_alive = "1"
+	}
 	query := fmt.Sprintf(`
 		UPDATE settop SET
 			is_alive = '%s'
 		WHERE serial = '%s'
-	`, payloadStr, settopSerial)
+	`, settop_is_alive, settopSerial)
 	_, err := db.Exec(query)
 	if err != nil {
 		log.Println(err)
