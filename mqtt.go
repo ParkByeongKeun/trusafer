@@ -216,32 +216,69 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 			}
 		}
 
+		var sensor_uuid string
 		query = fmt.Sprintf(`
-			INSERT INTO sensor
-				SET uuid = '%s', 
-					settop_uuid = '%s',
-					status = '%s',
-					serial = '%s',
-					ip_address = '%s',
-					location = '%s',
-					registered_time = '%s',
-					mac = '%s',
-					name = '%s',
-					type = '%s'
-					
-			ON DUPLICATE KEY UPDATE
-				settop_uuid = VALUES(settop_uuid),
-				status = VALUES(status),
-				ip_address = VALUES(ip_address),
-				location = VALUES(location),
-				registered_time = VALUES(registered_time),
-				mac = VALUES(mac),
-				type = VALUES(type)
-		`,
-			uuid.String(), settop_uuid, "0",
-			string(sensorSerial), "", "",
-			formattedTime, settopMac, string(sensorSerial), position,
-		)
+			SELECT uuid
+			FROM sensor 
+			WHERE serial = '%s'
+		`, string(sensorSerial))
+		rows, err = db.Query(query)
+		if err != nil {
+			log.Println(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			err := rows.Scan(&sensor_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+
+		queryDelete := "DELETE FROM sensor WHERE serial = ?"
+		_, err = db.Exec(queryDelete, sensorSerial)
+		if err != nil {
+			log.Println(err)
+		}
+
+		queryThreshold := "DELETE FROM threshold WHERE sensor_uuid = ?"
+		_, err = db.Exec(queryThreshold, sensor_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+
+		querySelect := "SELECT COUNT(*) FROM sensor WHERE mac = ? AND type = ?"
+		var count int
+		err = db.QueryRow(querySelect, settopMac, position).Scan(&count)
+		if err != nil {
+			log.Println(err)
+		}
+
+		if count > 0 {
+			queryUpdate := `
+				UPDATE sensor
+				SET uuid = ?, 
+					settop_uuid = ?, 
+					status = ?, 
+					serial = ?, 
+					ip_address = ?, 
+					location = ?, 
+					registered_time = ?, 
+					name = ?
+				WHERE mac = ? AND type = ?`
+			_, err = db.Exec(queryUpdate, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, sensorSerial, settopMac, position)
+			if err != nil {
+				log.Println(err)
+			}
+		} else if count == 0 {
+			queryInsert := `
+				INSERT INTO sensor (uuid, settop_uuid, status, serial, ip_address, location, registered_time, mac, name, type)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			_, err = db.Exec(queryInsert, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, settopMac, sensorSerial, position)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+
 		sqlAddSensor, err := db.Query(query)
 		if err != nil {
 			log.Println(err)
@@ -708,15 +745,18 @@ func handleIpmoduleConnection(client mqtt.Client, settopSerial string, mac strin
 		if err != nil {
 			log.Println(err)
 		}
-		query = fmt.Sprintf(`
-			UPDATE sensor SET
-				status = '%s'
-			WHERE serial = '%s'
-		`, strconv.Itoa(sensorStatus), sensorSerial)
-		_, err = db.Exec(query)
-		if err != nil {
-			log.Println(err)
+		if sensorStatus == 3 {
+			query = fmt.Sprintf(`
+				UPDATE sensor SET
+					status = '%s'
+				WHERE serial = '%s'
+			`, strconv.Itoa(sensorStatus), sensorSerial)
+			_, err = db.Exec(query)
+			if err != nil {
+				log.Println(err)
+			}
 		}
+
 		message := eventMessage(settopSerial, eventType, sensorSerial)
 		firebaseMessagePush(message, settopSerial)
 
