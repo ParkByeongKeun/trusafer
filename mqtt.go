@@ -301,8 +301,9 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 				log.Println(err)
 			}
 		}
-		mainListMapping = NewMainListResponseMapping()
+		thresholdMapping.RemoveThresholdMapping(sensorSerial)
 		initThreshold9Data(get_sensor_uuid)
+		mainListMapping = NewMainListResponseMapping()
 		defer sqlAddSensor.Close()
 		mStatus[string(sensorSerial)] = ""
 		eventType = 3 //log online

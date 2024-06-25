@@ -1412,7 +1412,6 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 	query := fmt.Sprintf(`
 		UPDATE sensor SET
 			settop_uuid = '%s',
-			status = '%d',
 			serial = '%s',
 			ip_address = '%s',
 			location = '%s',
@@ -1421,7 +1420,7 @@ func (s *server) UpdateSensor(ctx context.Context, in *pb.UpdateSensorRequest) (
 			name = '%s'
 		WHERE uuid = '%s'
 		`,
-		in.Sensor.GetSettopUuid(), in.Sensor.GetStatus(),
+		in.Sensor.GetSettopUuid(),
 		in.Sensor.GetSerial(), in.Sensor.GetIpAddress(), in.Sensor.GetLocation(),
 		in.Sensor.GetRegisteredTime(), in.Sensor.IpModuleMac, in.Sensor.GetName(), in.Sensor.GetUuid())
 
