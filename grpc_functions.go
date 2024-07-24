@@ -2457,7 +2457,7 @@ func (s *server) StreamImage(ctx context.Context, req *pb.ImageRequest) (*pb.Ima
 
 	query := fmt.Sprintf(`from(bucket: "%s")
     |> range(start: %s, stop: %s)
-    |> filter(fn: (r) => r._field != "%s")
+    |> filter(fn: (r) => r._measurement == "%s")
 	|> filter(fn: (r) => r["_field"] == "image_data")
     `,
 		Conf.InfluxDB.Bucket,
