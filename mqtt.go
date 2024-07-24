@@ -234,27 +234,42 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 			}
 		}
 
-		queryDelete := "DELETE FROM sensor WHERE serial = ?"
-		_, err = db.Exec(queryDelete, sensorSerial)
+		queryCheckSelect := "SELECT COUNT(*) FROM sensor WHERE mac = ? AND type = ? AND serial = ?"
+		var checkCount int
+		err = db.QueryRow(queryCheckSelect, settopMac, position, sensorSerial).Scan(&checkCount)
 		if err != nil {
 			log.Println(err)
 		}
 
-		queryThreshold := "DELETE FROM threshold WHERE sensor_uuid = ?"
-		_, err = db.Exec(queryThreshold, sensor_uuid)
-		if err != nil {
-			log.Println(err)
-		}
+		if checkCount > 0 {
+			queryUpdate := "UPDATE sensor SET status = ?, registered_time = ? WHERE mac = ? AND type = ? AND serial = ?"
+			_, err = db.Exec(queryUpdate, "0", formattedTime, settopMac, position, sensorSerial)
+			if err != nil {
+				log.Println(err)
+			}
+		} else {
 
-		querySelect := "SELECT COUNT(*) FROM sensor WHERE mac = ? AND type = ?"
-		var count int
-		err = db.QueryRow(querySelect, settopMac, position).Scan(&count)
-		if err != nil {
-			log.Println(err)
-		}
+			queryDelete := "DELETE FROM sensor WHERE serial = ?"
+			_, err = db.Exec(queryDelete, sensorSerial)
+			if err != nil {
+				log.Println(err)
+			}
 
-		if count > 0 {
-			queryUpdate := `
+			queryThreshold := "DELETE FROM threshold WHERE sensor_uuid = ?"
+			_, err = db.Exec(queryThreshold, sensor_uuid)
+			if err != nil {
+				log.Println(err)
+			}
+
+			querySelect := "SELECT COUNT(*) FROM sensor WHERE mac = ? AND type = ?"
+			var count int
+			err = db.QueryRow(querySelect, settopMac, position).Scan(&count)
+			if err != nil {
+				log.Println(err)
+			}
+
+			if count > 0 {
+				queryUpdate := `
 				UPDATE sensor
 				SET uuid = ?, 
 					settop_uuid = ?, 
@@ -265,46 +280,48 @@ func handleSensorConnection(client mqtt.Client, settopSerial string, settopMac s
 					registered_time = ?, 
 					name = ?
 				WHERE mac = ? AND type = ?`
-			_, err = db.Exec(queryUpdate, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, sensorSerial, settopMac, position)
-			if err != nil {
-				log.Println(err)
-			}
-		} else if count == 0 {
-			queryInsert := `
+				_, err = db.Exec(queryUpdate, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, sensorSerial, settopMac, position)
+				if err != nil {
+					log.Println(err)
+				}
+			} else if count == 0 {
+				queryInsert := `
 				INSERT INTO sensor (uuid, settop_uuid, status, serial, ip_address, location, registered_time, mac, name, type)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-			_, err = db.Exec(queryInsert, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, settopMac, sensorSerial, position)
+				_, err = db.Exec(queryInsert, uuid, settop_uuid, "0", sensorSerial, "", "", formattedTime, settopMac, sensorSerial, position)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+
+			sqlAddSensor, err := db.Query(query)
 			if err != nil {
 				log.Println(err)
 			}
+			var get_sensor_uuid string
+			var sensor_name string
+			query = fmt.Sprintf(`
+				SELECT uuid, name 
+				FROM sensor 
+				WHERE serial = '%s'
+			`, string(sensorSerial))
+			rows, err = db.Query(query)
+			if err != nil {
+				log.Println(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				err := rows.Scan(&get_sensor_uuid, &sensor_name)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+			thresholdMapping.RemoveThresholdMapping(sensorSerial)
+			initThreshold9Data(get_sensor_uuid)
+			defer sqlAddSensor.Close()
 		}
 
-		sqlAddSensor, err := db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		var get_sensor_uuid string
-		var sensor_name string
-		query = fmt.Sprintf(`
-			SELECT uuid, name 
-			FROM sensor 
-			WHERE serial = '%s'
-		`, string(sensorSerial))
-		rows, err = db.Query(query)
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			err := rows.Scan(&get_sensor_uuid, &sensor_name)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-		thresholdMapping.RemoveThresholdMapping(sensorSerial)
-		initThreshold9Data(get_sensor_uuid)
 		mainListMapping = NewMainListResponseMapping()
-		defer sqlAddSensor.Close()
 		mStatus[string(sensorSerial)] = ""
 		eventType = 3 //log online
 		sensorStatus = 0
@@ -987,18 +1004,18 @@ func analizeFrame(data []byte, width, height, startRow int) ([9]float64, [9]floa
 				max = temp
 			}
 			var row int
-			if y < int(math.Round(float64(height/3.))) {
+			if y < int(math.Round(float64(height)/3.)) {
 				row = 0
-			} else if y < int(math.Round(float64(height*2/3.))) {
+			} else if y < int(math.Round(float64(height)*2/3.)) {
 				row = 1
 			} else {
 				row = 2
 			}
 
 			idx := 0
-			if x < int(math.Round(float64(width/3.))) {
+			if x < int(math.Round(float64(width)/3.)) {
 				idx = row * 3
-			} else if x < int(math.Round(float64(width*2/3.))) {
+			} else if x < int(math.Round(float64(width)*2/3.)) {
 				idx = row*3 + 1
 			} else {
 				idx = row*3 + 2
