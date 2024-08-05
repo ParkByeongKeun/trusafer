@@ -778,6 +778,22 @@ func (s *server) DeletePlace(ctx context.Context, in *pb.DeletePlaceRequest) (*p
 		return nil, err
 	}
 	fmt.Println("delete count : ", nRow)
+
+	query = fmt.Sprintf(`
+		UPDATE settop SET
+			place_uuid = '%s', 
+			room = '%s',
+			floor = '%s'
+		WHERE place_uuid = '%s'
+		`,
+		"", "", "", in.GetPlaceUuid())
+	_, err = db.Exec(query)
+	if err != nil {
+		log.Println(err)
+		err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+		return nil, err
+	}
+
 	return &pb.DeletePlaceResponse{}, nil
 }
 
