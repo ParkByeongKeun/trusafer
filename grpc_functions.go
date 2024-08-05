@@ -1060,7 +1060,47 @@ func (s *server) DeleteSettop(ctx context.Context, in *pb.DeleteSettopRequest) (
 		err = status.Errorf(codes.Internal, "Internal Server Error: %v", err)
 		return nil, err
 	}
-	fmt.Println("delete count : ", nRow)
+	fmt.Println("delete settop count : ", nRow)
+
+	var sensor_uuid string
+	query = fmt.Sprintf(`
+		SELECT uuid
+		FROM sensor 
+		WHERE settop_uuid = '%s'
+	`, in.GetSettopUuid())
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		err := rows.Scan(&sensor_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+
+		query = fmt.Sprintf(`
+			DELETE FROM sensor
+			WHERE settop_uuid = '%s'
+		`,
+			in.GetSettopUuid())
+		sqlDeleteSettop, err = db.Exec(query)
+		if err != nil {
+			log.Println(err)
+		}
+		nRow, err = sqlDeleteSettop.RowsAffected()
+		if err != nil {
+			log.Println(err)
+		}
+		fmt.Println("delete sensor count : ", nRow)
+
+		queryThreshold := "DELETE FROM threshold WHERE sensor_uuid = ?"
+		_, err = db.Exec(queryThreshold, sensor_uuid)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
 	return &pb.DeleteSettopResponse{}, nil
 }
 
