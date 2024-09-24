@@ -2434,16 +2434,14 @@ func (s *server) FindEmail(ctx context.Context, in *pb.FindEmailRequest) (*pb.Fi
 			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
 			return nil, err
 		}
+
 		phone_number := string(phone_number_aes256)
 		if phone_number == in.GetPhoneNumber() {
-			response.Email = auth_email
-		} else {
-			err = status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
-			return nil, err
+			response.Email = append(response.Email, auth_email)
 		}
 	}
-	if response.Email == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "Bad Request: %v", err)
+	if len(response.Email) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "Email not found[2]: %v", err)
 	}
 	return response, nil
 }
